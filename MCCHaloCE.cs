@@ -1,4 +1,4 @@
-﻿//#define DEVELOPMENT
+﻿#define DEVELOPMENT
 
 using ConnectorLib.Inject.AddressChaining;
 using ConnectorLib.Inject.VersionProfiles;
@@ -117,6 +117,29 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private float OthersReceivedDamageFactor = 1;
         private bool InstakillEnemies = false;
 
+        // Deactivation script code for all parts in the HUD
+        private const int Crosshair = 10;
+
+        private const int Health = 11;
+        private const int MotionSensor = 12;
+        private const int Shield = 13;
+        private List<int> HudParts = new() { Crosshair, Health, MotionSensor, Shield };
+
+        // Deactivation script code for all parts in the HUD currently deactivated.
+        private List<int> DisabledHubParts = new();
+
+        private void RepairHUD(int specificPart = 0)
+        {
+            if (specificPart == 0)
+            {
+                DisabledHubParts.Clear();
+            }
+            else
+            {
+                DisabledHubParts = DisabledHubParts.Where(x => x != specificPart).ToList();
+            }
+        }
+
         #endregion Status Control
 
         public override Game Game { get; } = new("MCC Halo Combat Evolved", "MCCHaloCE", "PC", ConnectorType.PCConnector);
@@ -175,24 +198,28 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             // Damage related
             new("Quad damage", "enemyreceiveddamage_quad") { Category = DamageCategory, Duration = 20,
                 Description = "Enemies receive 4 times the damage."},
-            new("Ludicrous damage", "enemyreceiveddamage_ludicrous") { Category = DamageCategory, Duration = 20,
-                Description = "Any damage will kill an enemy or enemy vehicle"},
+            //new("Ludicrous damage", "enemyreceiveddamage_ludicrous") { Category = DamageCategory, Duration = 20,
+            //    Description = "Any damage will kill an enemy or enemy vehicle"}, // Irrelevant since we have Omnipotent
             new("Mythic", "enemyreceiveddamage_half") { Category = DamageCategory, Duration = 20,
                 Description = "Enemies have twice the health and shields."},
             new("Spartan medicine", "enemyreceiveddamage_reversed") { Category = DamageCategory, Duration = 20,
                 Description = "Damage HEALS non-players, without a max health cap." },
             new("Lore accurate Mjolnir armor", "playerreceiveddamage_tenth") { Category = DamageCategory, Duration = 20,
                 Description = "Player receives massively reduced damage."},
-            new("The Kat treatment", "playerreceiveddamage_instadeath") { Category = DamageCategory, Duration = 99920,
+            new("The Kat treatment", "playerreceiveddamage_instadeath") { Category = DamageCategory, Duration = 20,
                 Description = "One hit will break your shields, the next will kill you. Your helmet won't help you."},
             new("Plot armor", "playerreceiveddamage_invulnerable") { Category = DamageCategory, Duration = 20,
                 Description = "I'll have you know that I've become indestructible, determination that is incorruptible!"},
             new("Heaven or hell", "allreceiveddamage_instadeath") { Category = DamageCategory, Duration = 20,
-                Description = "Enemies die in one hit. But so do you."},
+                Description = "Enemies (except dropships) die in one hit. But so do you."},
             new("Nerf war", "allreceiveddamage_invulnerable") { Category = DamageCategory, Duration = 20,
                 Description = "Nobody receives ANY damage"},
             new("Glass cannon", "allreceiveddamage_glass") { Category = DamageCategory, Duration = 20,
                 Description = "Deal triple damage, but also receive it."},
+            new("One shot one kill", "continuouseffect_24") { Category = DamageCategory, Duration = 20,
+                Description = "Kill any enemy in one hit, including dropships."},
+            new("Deathless", "continuouseffect_25") { Category = DamageCategory, Duration = 20,
+                Description = "You do take damage, but you won't die."},
 
             // Mixed hinderances
             new("Kill player", "oneshotscripteffect_1") { Category = MixedHinderancesCategory,
@@ -211,6 +238,68 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 Description = "Become unable to act, while still being very vincible."},
             new("Invert view controls", "continuouseffect_2") { Category = MixedHinderancesCategory, Duration = 5,
                 Description = "Sets the view controls to inverted, or to normal if they were already inverted"},
+            new("Rapture", "continuouseffect_15") { Category = MixedHinderancesCategory, Duration = 10,
+                Description = "Heavens call, and you shall answer."}, // TODO: Include a forced jump, gravity does not affect you in the ground.
+
+            // Mixed help
+            new("Active camouflage", "oneshotscripteffect_6") {Category = MixedHelpCategory,
+                Description = "Gives active camouflage."},
+            new("Give weapons", "oneshotscripteffect_7") {Category = MixedHelpCategory,
+                Description = "Spawns a wide selection of weapons around the player."},
+            new("Slipspace jump", "oneshotscripteffect_8") {Category = MixedHelpCategory,
+                Description = "Skip the current level!"},
+            new("Give all vehicles... safely", "continuouseffect_3") {Category = MixedHelpCategory, Duration = 5,
+                Description = "Spawns all available vehicles on top of the player and makes it invulnerable long enough to survive it."},
+            new("AI break", "continuouseffect_4") {Category = MixedHelpCategory, Duration = 15,
+                Description = "Turns all AI off for a bit."},
+
+            // Movement
+            new("Jetpack", "continuouseffect_5") { Category = "Movement", Duration = 15,
+                Description="Take no fall damage. Hold jump to fly and crouch to hover." },
+            new("High gravity", "continuouseffect_6") { Category = "Movement", Duration = 15,
+                Description="Increases gravity by a lot." },
+            new("Low gravity", "continuouseffect_7") { Category = "Movement", Duration = 15,
+                Description="Decreases gravity by a lot." },
+            new("Super jump", "continuouseffect_8") { Category = "Movement", Duration = 15,
+                Description="Jump like a dragoon. Safe landing not included." },
+
+            // Oddities
+            new("Such devastation", "oneshotscripteffect_9") { Category = OdditiesCategory,
+                Description = "Destroy EVERYTHING nearby. This was not your intention." },
+            new("Big mode", "continuouseffect_9") { Category = OdditiesCategory, Duration = 15,
+                Description="Become huge." },
+            new("Pocket spartan", "continuouseffect_10") { Category = OdditiesCategory, Duration = 15,
+                Description="Become small."},
+            new("Body snatcher", "continuouseffect_11") { Category = OdditiesCategory, Duration = 15,
+                Description= "Possess anyone you touch."},
+            new("This is awkward", "continuouseffect_12") { Category = OdditiesCategory, Duration = 15,
+                Description= "Prevents action by anyone for a bit."},
+            new("Medusa-117", "continuouseffect_13") { Category = OdditiesCategory, Duration = 15,
+                Description = "Anyone that locks eyes with you will die."},
+            new("Truly infinite ammo", "continuouseffect_14") { Category = OdditiesCategory, Duration = 15,
+                Description = "Bottomless clips. No heat. Infinite ammo and battery."}, // TODO: this does not add grenades. Update that.
+
+            // Visibility and HUD
+            new("Darkest stormy night", "continuouseffect_16") { Category = VisibilityAndHudCategory, Duration = 45,
+                Description = "Pitch black, the only light coming from occasional thunder." },
+            new("Highly visible NPCs.", "continuouseffect_17") { Category = VisibilityAndHudCategory, Duration = 15,
+                Description = "NPCs and objects are always bright." },
+            new("Barely visible NPCs", "continuouseffect_18") { Category = VisibilityAndHudCategory, Duration = 15,
+                Description = "NPCs and objects are always the darkest they can be." },
+            new("Movie mode", "continuouseffect_19") { Category = VisibilityAndHudCategory, Duration = 15,
+                Description = "Sets the mood for some popcorn." },
+            new("Paranoia", "continuouseffect_20") { Category = VisibilityAndHudCategory, Duration = 25,
+                Description = "Give the player additional anxiety." },
+            new("Blind", "continuouseffect_21") { Category = VisibilityAndHudCategory, Duration = 15,
+                Description = "Disable the HUD." },
+            new("Expert aiming mode", "continuouseffect_22") { Category = VisibilityAndHudCategory, Duration = 15,
+                Description = "Disable the crosshair." },
+            new("Silence", "continuouseffect_23") { Category = VisibilityAndHudCategory, Duration = 25,
+                Description = "Disable sound." },
+            new("Malfunction", "oneshotscripteffect_10") { Category = VisibilityAndHudCategory,
+                Description = "Disable a random section of the HUD permanently." },// 10, 11, 12 and 13 are reserved for Malfunction
+            new("HUD technician", "oneshotscripteffect_14") { Category = VisibilityAndHudCategory,
+                Description = "Make every part of the HUD visible again." },
 
             // And that's enough for now.
 #if DEVELOPMENT
@@ -1657,6 +1746,21 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             HandleInvalidRequest(request); return;
                         }
 
+                        if (slot == 10)
+                        {
+                            // Replace it by one of the Malfunction codes.
+                            List<int> nonDeactivatedParts = HudParts.Except(DisabledHubParts).ToList();
+                            if (nonDeactivatedParts.Count == 0)
+                            {
+                                // TODO: refund.
+                                return;
+                            }
+                            slot = nonDeactivatedParts[new Random().Next(nonDeactivatedParts.Count)];
+                            DisabledHubParts.Add(slot);
+
+                            // TODO: Make it reset on level load.
+                        }
+
                         string message = slot switch
                         {
                             1 => "killed you in cold blood.",
@@ -1664,6 +1768,15 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             3 => "reset you to the last chceckpoint.",
                             4 => "made you restart the level!",
                             5 => "dropped all vehicles on your head.",
+                            6 => "made you go sneaky beaky like.",
+                            7 => "had some good things on sale, stranger!",
+                            8 => "beat this level for you!",
+                            9 => "deployed the mother of all OOFs.",
+                            10 => "disabled your crosshair.",// 10, 11, 12 and 13 are reserved for Malfunction
+                            11 => "disabled your health meter.",
+                            12 => "disabled your motion sensor.",
+                            13 => "disabled your shields meter.",
+                            14 => "repaired your HUD.",
                         };
 
                         string? mutex = slot switch
@@ -1673,6 +1786,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
                         Action additionalStartAction = slot switch
                         {
+                            14 => () => RepairHUD(),
                             _ => () => { }
                             ,
                         };
@@ -1700,6 +1814,29 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             0 => "locked your armor.",
                             1 => "locked your armor, but \"forgot\" to include a shield.",
                             2 => "inverted your viewing controls.",
+                            3 => "carefully delivered vehicles.",
+                            4 => "told the AI to chill for a second",
+                            5 => "gave you a jetpack.",
+                            6 => "increased gravity.",
+                            7 => "decreased gravity.",
+                            8 => "boosted your jumps. Remember to roll!",
+                            9 => "made you big.",
+                            10 => "made you tiny",
+                            11 => "granted you possession of whoever you touch.",
+                            12 => "started an awkward moment",
+                            13 => "turned you into a gorgon.",
+                            14 => "gave you truly infinite ammo.",
+                            15 => "commenced your ascension.",
+                            16 => "turned off the lights.",
+                            17 => "made all NPCs OSHA compliant.",
+                            18 => "made all NPCs harder to see.",
+                            19 => "brought out the popcorn.",
+                            20 => "triggered something. Probably something bad.",
+                            21 => "disabled your HUD.",
+                            22 => "disabled your crosshair.",
+                            23 => "blew up your eardrums.",
+                            24 => "granted you the power to smite your foes in one blow.",
+                            25 => "says you will die when they say, not before",
                         };
 
                         string endMessage = slot switch
@@ -1707,6 +1844,29 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             0 => "Armor lock ended.",
                             1 => "Armor lock ended.",
                             2 => "Viewing controls back to normal",
+                            3 => "Delivery complete.",
+                            4 => "AI reactivated",
+                            5 => "Jetpack removed. Hope you were not far from the ground.",
+                            6 => "Gravity is back to normal.",
+                            7 => "Gravity is back to normal.",
+                            8 => "Jumps are back to normal",
+                            9 => "You are a regular sized spartan once more.",
+                            10 => "You are a regular sized spartan once more.",
+                            11 => "It is now safe to touch people again.",
+                            12 => "Well, the moment has passed. Back to work.",
+                            13 => "It is now safe to gaze into thy eyes again",
+                            14 => "Ammo is limited again",
+                            15 => "Nevermind you're a total sinner.",
+                            16 => "Let there be light once more.",
+                            17 => "NPC visibility back to normal",
+                            18 => "NPC visibility back to normal",
+                            19 => "Fin.",
+                            20 => "You regain confidence.",
+                            21 => "HUD reactivated.",
+                            22 => "Crosshair reactivated.",
+                            23 => "Sound restored.",
+                            24 => "Your damage is back to normal.",
+                            25 => "You are mortal once more.",
                         };
 
                         string[]? mutex = slot switch
@@ -1714,6 +1874,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             0 => new string[] { "armor lock", "playerDamageReceived" },
                             1 => new string[] { "armor lock" },
                             2 => new string[] { "viewing controls" },
+                            4 => new string[] { "playerDamageReceived" },
+                            5 => new string[] { "ai" },
+                            6 => new string[] { "gravity" },
+                            7 => new string[] { "gravity" },
+                            9 => new string[] { "size" },
+                            10 => new string[] { "size" },
+                            12 => new string[] { "armor lock", "ai" },
+                            14 => new string[] { "ammo" },
+                            15 => new string[] { "gravity" },
+                            17 => new string[] { "object_light_scale" },
+                            18 => new string[] { "object_light_scale" },
                             _ => null,
                         };
 
@@ -1725,9 +1896,21 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                                 InjectConditionalDamageMultiplier();
                             }
                             ,
+                            3 => () =>
+                            {
+                                PlayerReceivedDamageFactor = 0f;
+                                InjectConditionalDamageMultiplier();
+                            }
+                            ,
+                            22 => () =>
+                            {
+                                DisabledHubParts.Add(Crosshair);
+                                DisabledHubParts = DisabledHubParts.Distinct().ToList();
+                            }
+                            ,
                             _ => () => { }
                             ,
-                        };
+                        }; ;
                         Action additionalEndAction = slot switch
                         {
                             0 => () =>
@@ -1735,6 +1918,14 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                                 PlayerReceivedDamageFactor = 1f;
                                 InjectConditionalDamageMultiplier();
                             }
+                            ,
+                            3 => () =>
+                            {
+                                PlayerReceivedDamageFactor = 1f;
+                                InjectConditionalDamageMultiplier();
+                            }
+                            ,
+                            22 => () => RepairHUD(Crosshair)
                             ,
                             _ => () => { }
                             ,
