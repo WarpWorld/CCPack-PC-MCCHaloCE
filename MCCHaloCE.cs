@@ -167,13 +167,6 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         public const string VisibilityAndHudCategory = "Visibility and HUD";
 
         public override EffectList Effects => new List<Effect> {
-#if DEVELOPMENT
-            new("Abort all injection", "abortallinjection")
-            {
-                Description = "Dev only. Use before reloading the effect pack to reset any modified memory and prevent any further" +
-                "memory modification before the reload."
-            },
-#endif
             // Player stats change
             new("Give one shield charge", "shield_plus1") {Category = HealthAndShieldsCategory,
                 Description = "Increases the current shield by a full charge (the normal full shield amount). It stacks infinitely."},
