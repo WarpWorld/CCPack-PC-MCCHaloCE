@@ -1,4 +1,4 @@
-﻿#define DEVELOPMENT
+﻿//#define DEVELOPMENT
 
 using ConnectorLib.Inject.AddressChaining;
 using ConnectorLib.Inject.VersionProfiles;
@@ -67,6 +67,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // Points to where the injected code store the variables we use to communicate with the H1 scripts.
         private AddressChain? scriptVarInstantEffectsPointerPointer_ch = null;
 
+        // Note: This points to the first var. Any others will be referred using a multiple of 8 offset on the value pointed by this one.
         private AddressChain? scriptVarTimedEffectsPointerPointer = null;
 
         // Periodically checks if injections are needed.
@@ -88,6 +89,9 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // Default size of created code caves.
         private const int StandardCaveSizeBytes = 1024;
 
+        // Continuous script variables use bits in a script variable to be activated. Hence there's a max after which we need to use another variable.
+        private const int MaxContinousScriptEffectSlotPerVar = 30;
+
         #region Memory Identifiers
 
         // Strings used to identify the purpose of memory changes and group them.
@@ -105,6 +109,15 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         #region Injection Offsets
 
         private const long ScriptInjectionPointOffset = 0xACC0E9;
+
+        // Player pointer offsets:
+
+        // Relative to base player pointer. Grenade type value offset + grenade of type 1 amount offset.
+        // Each grenade type has a 1 byte amount. 2 total bytes in normal halo, 4 in cursed.
+        private const int FirstGrenadeTypeAmountOffset = 0x2d6 + 0x26;
+
+        private const int XCoordOffset = 0x18; // Y and Z are at a 4 and 8 offset from it respectevely.
+        private const int XSpeedOffset = 0x24; // Y and Z are at a 4 and 8 offset from it respectevely.
 
         #endregion Injection Offsets
 
@@ -155,7 +168,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
         public override EffectList Effects => new List<Effect> {
 #if DEVELOPMENT
-            new("Abort all injection", "abortallinjection"),
+            new("Abort all injection", "abortallinjection")
+            {
+                Description = "Dev only. Use before reloading the effect pack to reset any modified memory and prevent any further" +
+                "memory modification before the reload."
+            },
 #endif
             // Player stats change
             new("Give one shield charge", "shield_plus1") {Category = HealthAndShieldsCategory,
@@ -185,7 +202,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             new("Anchor", "playerspeed_anchored") {Category = SpeedCategory, Duration = TimeSpan.FromSeconds(20),
                 Description = "Anchors the player to the ground"},
             new("Confused legs", "playerspeed_reversed") {Category = SpeedCategory, Duration = TimeSpan.FromSeconds(20),
-                Description = "Reverses movement direction for any force, including your legs."},
+                Description = "Reverses movement direction for any force, including your legs. Can cause clipping through slopes."},
             new("Unstable airtime", "unstableairtime") {Category = SpeedCategory, Duration = TimeSpan.FromSeconds(20),
                 Description = "While on air, any momentum gets progressively bigger and bigger."},
             new("Alien zoomies", "enemyspeed_ludicrous") {Category = SpeedCategory, Duration = TimeSpan.FromSeconds(20),
@@ -239,7 +256,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             new("Invert view controls", "continuouseffect_2") { Category = MixedHinderancesCategory, Duration = 5,
                 Description = "Sets the view controls to inverted, or to normal if they were already inverted"},
             new("Rapture", "continuouseffect_15") { Category = MixedHinderancesCategory, Duration = 10,
-                Description = "Heavens call, and you shall answer."}, // TODO: Include a forced jump, gravity does not affect you in the ground.
+                Description = "Heavens call, and you shall answer."},
+            new("Take grenades", "grenades_take") { Category = MixedHinderancesCategory,
+                Description = "Takes 6 grenades away of each type." },
+            new("Give unsafe checkpoint", "oneshotscripteffect_16") { Category = MixedHinderancesCategory,
+                Description = "Gives a checkpoint immediately, regardless of if the player is about to die or falling to their doom."},
+            new("Shove", "addspeed_shove1") { Category = MixedHinderancesCategory,
+                Description = "Shove the player in a random direction and strength"},
+            new("The shakes", "addspeed_shake") { Category = MixedHinderancesCategory, Duration = 7,
+                Description = "Shake the player for a bit."},
+            new("Drunk", "addspeed_drunk") { Category = MixedHinderancesCategory, Duration = 30,
+                Description = "Make the player stumble for a while."},
 
             // Mixed help
             new("Active camouflage", "oneshotscripteffect_6") {Category = MixedHelpCategory,
@@ -248,10 +275,18 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 Description = "Spawns a wide selection of weapons around the player."},
             new("Slipspace jump", "oneshotscripteffect_8") {Category = MixedHelpCategory,
                 Description = "Skip the current level!"},
-            new("Give all vehicles... safely", "continuouseffect_3") {Category = MixedHelpCategory, Duration = 5,
+            new("Give all vehicles... safely", "continuouseffect_3") {Category = MixedHelpCategory, Duration = 10,
                 Description = "Spawns all available vehicles on top of the player and makes it invulnerable long enough to survive it."},
             new("AI break", "continuouseffect_4") {Category = MixedHelpCategory, Duration = 15,
                 Description = "Turns all AI off for a bit."},
+            new("Give grenades", "grenades_give") { Category = MixedHelpCategory,
+                Description = "Gives 6 grenades of each type."},
+            new("Give non-warthog grenades", "grenades_givenowarthog") { Category = MixedHelpCategory,
+                Description = "Gives 6 grenades of each type, except throwable warthogs. They are a bit too useful."},
+            new("Give safe checkpoint", "oneshotscripteffect_15") { Category = MixedHelpCategory,
+                Description = "Gives a checkpoint as soon as the player is in a safe situation."},
+            new("Truly infinite ammo", "continuouseffect_14") { Category = MixedHelpCategory, Duration = 15,
+                Description = "Bottomless clips. No heat. Infinite ammo and battery. A boatload of grenades. Discombobulate."},
 
             // Movement
             new("Jetpack", "continuouseffect_5") { Category = "Movement", Duration = 15,
@@ -276,8 +311,6 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 Description= "Prevents action by anyone for a bit."},
             new("Medusa-117", "continuouseffect_13") { Category = OdditiesCategory, Duration = 15,
                 Description = "Anyone that locks eyes with you will die."},
-            new("Truly infinite ammo", "continuouseffect_14") { Category = OdditiesCategory, Duration = 15,
-                Description = "Bottomless clips. No heat. Infinite ammo and battery."}, // TODO: this does not add grenades. Update that.
 
             // Visibility and HUD
             new("Darkest stormy night", "continuouseffect_16") { Category = VisibilityAndHudCategory, Duration = 45,
@@ -302,7 +335,122 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 Description = "Make every part of the HUD visible again." },
 
             // And that's enough for now.
+#if DEVELOPMENT
+            new("Test second var", "continuouseffect_30") {
+                Description = "Dev only. Used to verify the second var works as expected." },
+            new("Script effect 1", "oneshotscripteffectgeneric_1"),
+            new("Script effect 2", "oneshotscripteffectgeneric_2"),
+            new("Script effect 3", "oneshotscripteffectgeneric_3"),
+            new("Script effect 4", "oneshotscripteffectgeneric_4"),
+            new("Script effect 5", "oneshotscripteffectgeneric_5"),
+            new("Script effect 6", "oneshotscripteffectgeneric_6"),
+            new("Script effect 7", "oneshotscripteffectgeneric_7"),
+            new("Script effect 8", "oneshotscripteffectgeneric_8"),
+            new("Script effect 9", "oneshotscripteffectgeneric_9"),
+            new("Script effect 10", "oneshotscripteffectgeneric_10"),
+            new("Script effect 11", "oneshotscripteffectgeneric_11"),
+            new("Script effect 12", "oneshotscripteffectgeneric_12"),
+            new("Script effect 13", "oneshotscripteffectgeneric_13"),
+            new("Script effect 14", "oneshotscripteffectgeneric_14"),
+            new("Script effect 15", "oneshotscripteffectgeneric_15"),
+            new("Script effect 16", "oneshotscripteffectgeneric_16"),
+            new("Script effect 17", "oneshotscripteffectgeneric_17"),
+            new("Script effect 18", "oneshotscripteffectgeneric_18"),
+            new("Script effect 19", "oneshotscripteffectgeneric_19"),
+            new("Script effect 20", "oneshotscripteffectgeneric_20"),
+            new("Script effect 21", "oneshotscripteffectgeneric_21"),
+            new("Script effect 22", "oneshotscripteffectgeneric_22"),
+            new("Script effect 23", "oneshotscripteffectgeneric_23"),
+            new("Script effect 24", "oneshotscripteffectgeneric_24"),
+            new("Script effect 25", "oneshotscripteffectgeneric_25"),
+            new("Script effect 26", "oneshotscripteffectgeneric_26"),
+            new("Script effect 27", "oneshotscripteffectgeneric_27"),
+            new("Script effect 28", "oneshotscripteffectgeneric_28"),
+            new("Script effect 29", "oneshotscripteffectgeneric_29"),
+            new("Script effect 30", "oneshotscripteffectgeneric_30"),
+            new("Script effect 31", "oneshotscripteffectgeneric_31"),
+            new("Script effect 32", "oneshotscripteffectgeneric_32"),
+            new("Script effect 33", "oneshotscripteffectgeneric_33"),
+            new("Script effect 34", "oneshotscripteffectgeneric_34"),
+            new("Script effect 35", "oneshotscripteffectgeneric_35"),
+            new("Script effect 36", "oneshotscripteffectgeneric_36"),
+            new("Script effect 37", "oneshotscripteffectgeneric_37"),
+            new("Script effect 38", "oneshotscripteffectgeneric_38"),
+            new("Script effect 39", "oneshotscripteffectgeneric_39"),
+            new("Script effect 40", "oneshotscripteffectgeneric_40"),
+            new("Script effect 41", "oneshotscripteffectgeneric_41"),
+            new("Script effect 42", "oneshotscripteffectgeneric_42"),
+            new("Script effect 43", "oneshotscripteffectgeneric_43"),
+            new("Script effect 44", "oneshotscripteffectgeneric_44"),
+            new("Script effect 45", "oneshotscripteffectgeneric_45"),
+            new("Script effect 46", "oneshotscripteffectgeneric_46"),
+            new("Script effect 47", "oneshotscripteffectgeneric_47"),
+            new("Script effect 48", "oneshotscripteffectgeneric_48"),
+            new("Script effect 49", "oneshotscripteffectgeneric_49"),
+            new("Script effect 50", "oneshotscripteffectgeneric_50"),
+            new("Script effect 51", "oneshotscripteffectgeneric_51"),
+            new("Script effect 52", "oneshotscripteffectgeneric_52"),
+            new("Script effect 53", "oneshotscripteffectgeneric_53"),
+            new("Script effect 54", "oneshotscripteffectgeneric_54"),
+            new("Script effect 55", "oneshotscripteffectgeneric_55"),
+            new("Script effect 56", "oneshotscripteffectgeneric_56"),
+            new("Script effect 57", "oneshotscripteffectgeneric_57"),
+            new("Script effect 58", "oneshotscripteffectgeneric_58"),
+            new("Script effect 59", "oneshotscripteffectgeneric_59"),
+            new("Script effect 60", "oneshotscripteffectgeneric_60"),
+            new("Script effect 61", "oneshotscripteffectgeneric_61"),
+            new("Script effect 62", "oneshotscripteffectgeneric_62"),
+            new("Script effect 63", "oneshotscripteffectgeneric_63"),
+            new("Script effect 64", "oneshotscripteffectgeneric_64"),
+            new("Script effect 65", "oneshotscripteffectgeneric_65"),
+            new("Script effect 66", "oneshotscripteffectgeneric_66"),
+            new("Script effect 67", "oneshotscripteffectgeneric_67"),
+            new("Script effect 68", "oneshotscripteffectgeneric_68"),
+            new("Script effect 69", "oneshotscripteffectgeneric_69"),
+            new("Script effect 70", "oneshotscripteffectgeneric_70"),
+            new("Script effect 71", "oneshotscripteffectgeneric_71"),
+            new("Script effect 72", "oneshotscripteffectgeneric_72"),
+            new("Script effect 73", "oneshotscripteffectgeneric_73"),
+            new("Script effect 74", "oneshotscripteffectgeneric_74"),
+            new("Script effect 75", "oneshotscripteffectgeneric_75"),
+            new("Script effect 76", "oneshotscripteffectgeneric_76"),
+            new("Script effect 77", "oneshotscripteffectgeneric_77"),
+            new("Script effect 78", "oneshotscripteffectgeneric_78"),
+            new("Script effect 79", "oneshotscripteffectgeneric_79"),
+            new("Script effect 80", "oneshotscripteffectgeneric_80"),
+            new("Script effect 81", "oneshotscripteffectgeneric_81"),
+            new("Script effect 82", "oneshotscripteffectgeneric_82"),
+            new("Script effect 83", "oneshotscripteffectgeneric_83"),
+            new("Script effect 84", "oneshotscripteffectgeneric_84"),
+            new("Script effect 85", "oneshotscripteffectgeneric_85"),
+            new("Script effect 86", "oneshotscripteffectgeneric_86"),
+            new("Script effect 87", "oneshotscripteffectgeneric_87"),
+            new("Script effect 88", "oneshotscripteffectgeneric_88"),
+            new("Script effect 89", "oneshotscripteffectgeneric_89"),
+            new("Script effect 90", "oneshotscripteffectgeneric_90"),
 
+            new("Continuous effect 0", "continuouseffectgeneric_0") { Duration = TimeSpan.FromSeconds(7) },
+            new("Continuous effect 1", "continuouseffectgeneric_1") {Duration = TimeSpan.FromSeconds(7) },
+            new("Continuous effect 2", "continuouseffectgeneric_2") {Duration = TimeSpan.FromSeconds(7) },
+
+            new("Speed factor injection", "speedfactorinjection"),
+            new("Player pointer injection", "playerpointerinjection"),
+            new("Undo player pointer injection", "undoplayerpointerinjection"),
+            new("Damage conditional injection", "damageconditionalinjection"),
+            new("Undo damage conditional injection", "undodamageconditionalinjection"),
+            new("Unit structure locator, activate", "unitstructurelocatoractivate"),
+            new("Inject script hook", "injectscripthook"),
+            new("Undo script hook", "undoscripthook"),
+            new("Toggle injection check", "toggleinjectioncheck"),
+            new("Reset script communication variable", "resetscriptcommvar"),
+
+                        // old
+            new("Hyper Overshield", "hyperovershield"),
+            new("No shield", "noshield", ItemKind.Effect),
+            new("No shield recharge", "noshieldrecharge"),
+            new("Set to 1hp", "setto1hp"),
+            new("Heal", "heal"),
+#endif
         };
 
         #region init/deinit
@@ -484,11 +632,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 0x81, 0x3A, 0x00, 0x00, 0x00, 0x40, // cmp [rdx], 0x40 00 00 00 ;compare to initial value of var
                 0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x2B) // jne 0x2B to "pop rdx" to avoid storing any variable that isn't our marker
             .Append(
-                0x48, 0x83, 0xC2, 0x08, // add rdx,08
+                0x48, 0x83, 0xC2, 0x010, // add rdx,010 (8*2)
                 0x81, 0x3A, 0x09, 0xA4, 0x5D, 0x2E,//cmp [rdx],2E5DA409 ; compare to value of right anchor, 777888777
                 0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x1F) //jne (0X1F), to pop prdx
             .Append(
-                0x48, 0x83, 0xEA, 0x10,//sub rdx,10
+                0x48, 0x83, 0xEA, 0x18,//sub rdx,18
                 0x81, 0x3A, 0xB1, 0xD0, 0x5E, 0x07,//cmp [rdx],75ED0B1 L compare to value of left anchor 123654321)
                 0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x13)  //jne 0x13, to pop rdx
             .Append(
@@ -1282,8 +1430,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "no":
                             case "instant":
                                 bool hinder = code[1] == "no";
-                                RepeatAction(request,
-                                    () => true,
+                                RepeatAction(request, IsInGameplay,
                                     () => Connector.SendMessage($"{request.DisplayViewer}" +
                                         $" {(hinder ? "prevented your shield from recharging" : "gave you a fast regenerating shield.")}"),
                                     TimeSpan.FromSeconds(1),
@@ -1329,6 +1476,43 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                                     {
                                         Connector.SendMessage("Health regeneration ended.");
                                     });
+                        break;
+                    }
+                case "grenades":
+                    {
+                        if (code.Length < 2) { HandleInvalidRequest(request); return; }
+                        bool give = code[1] == "give" || code[1] == "givenowarthog";
+                        TryEffect(request, IsInGameplay,
+                                    () =>
+                                    {
+                                        if (!TryGetIndirectByteArray(basePlayerPointer_ch, FirstGrenadeTypeAmountOffset, 4, out byte[] grenadeValues))
+                                        {
+                                            return false;
+                                        }
+
+                                        for (int i = 0; i < grenadeValues.Length; i++)
+                                        {
+                                            if (i == 3 && code[1] == "givenowarthog")
+                                            {
+                                                // Skip giving throwable warthogs.
+                                                continue;
+                                            }
+
+                                            int value = grenadeValues[i];
+                                            value = Math.Max(value + (give ? +6 : -6), 0);
+                                            grenadeValues[i] = BitConverter.GetBytes(value)[0];
+                                        }
+
+                                        if (!TrySetIndirectByteArray(grenadeValues, basePlayerPointer_ch, FirstGrenadeTypeAmountOffset))
+                                        {
+                                            return false;
+                                        }
+
+                                        return true;
+                                    },
+                                    () => Connector.SendMessage($"{request.DisplayViewer} {(give ? "gave you" : "took away")} some grenades."),
+                                    true, "grenades");
+
                         break;
                     }
 
@@ -1623,6 +1807,74 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
                         break;
                     }
+                case "addspeed":
+                    {
+                        if (code.Length < 2) { HandleInvalidRequest(request); return; }
+                        switch (code[1])
+                        {
+                            case "shove1":
+                                {
+                                    ApplyRandomForce(0.5f, 0.5f, 0.15f); break;
+                                }
+                            case "shake":
+                                {
+                                    bool shake = true; // if true, apply force. If false, remove forces.
+                                    RepeatAction(request, IsInGameplay,
+                                        () => Connector.SendMessage($"{request.DisplayViewer} is shaking you."),
+                                        TimeSpan.FromSeconds(1),
+                                        IsInGameplay,
+                                        TimeSpan.FromMilliseconds(500),
+                                        () =>
+                                        {
+                                            if (shake)
+                                            {
+                                                ApplyRandomForce(0.4f, 0.4f, 0, true);
+                                            }
+                                            else
+                                            {
+                                                ApplyForce(0, 0, 0, false);
+                                            }
+
+                                            shake = !shake;
+
+                                            return true;
+                                        },
+                                        TimeSpan.FromMilliseconds(35), // aprox. once per frame
+                                        false,
+                                        "shove").WhenCompleted.Then(_ =>
+                                        {
+                                            ApplyForce(0, 0, 0, false);
+                                            Connector.SendMessage("The shakes are over.");
+                                        });
+
+                                    break;
+                                }
+                            case "drunk":
+                                {
+                                    bool shake = true; // if true, apply force. If false, remove forces.
+                                    RepeatAction(request, IsInGameplay,
+                                        () => Connector.SendMessage($"{request.DisplayViewer} gave you one too many drinks."),
+                                        TimeSpan.FromSeconds(1),
+                                        IsInGameplay,
+                                        TimeSpan.FromMilliseconds(500),
+                                        () =>
+                                        {
+                                            ApplyRandomForce(0.15f, 0.15f, 0, true);
+
+                                            return true;
+                                        },
+                                        TimeSpan.FromMilliseconds(800),
+                                        false,
+                                        "shove").WhenCompleted.Then(_ =>
+                                        {
+                                            ApplyForce(0, 0, 0, false);
+                                            Connector.SendMessage("Drunkess over, enjoy the hangover.");
+                                        });
+                                    break;
+                                }
+                        }
+                        break;
+                    }
 
                 #endregion Damage received modfiers
 
@@ -1664,6 +1916,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             12 => "disabled your motion sensor.",
                             13 => "disabled your shields meter.",
                             14 => "repaired your HUD.",
+                            15 => "gave you a safe checkpoint.",
+                            16 => "gave you a completely unsafe checkpoint.",
                         };
 
                         string? mutex = slot switch
@@ -1724,6 +1978,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             23 => "blew up your eardrums.",
                             24 => "granted you the power to smite your foes in one blow.",
                             25 => "says you will die when they say, not before",
+                            30 => "Second var test.",
                         };
 
                         string endMessage = slot switch
@@ -1754,6 +2009,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             23 => "Sound restored.",
                             24 => "Your damage is back to normal.",
                             25 => "You are mortal once more.",
+                            30 => "Second var test over.",
                         };
 
                         string[]? mutex = slot switch
@@ -1768,7 +2024,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             9 => new string[] { "size" },
                             10 => new string[] { "size" },
                             12 => new string[] { "armor lock", "ai" },
-                            14 => new string[] { "ammo" },
+                            14 => new string[] { "ammo", "grenades" },
                             15 => new string[] { "gravity" },
                             17 => new string[] { "object_light_scale" },
                             18 => new string[] { "object_light_scale" },
@@ -1789,6 +2045,12 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                                 InjectConditionalDamageMultiplier();
                             }
                             ,
+                            14 => () =>
+                            {
+                                TrySetIndirectByteArray(new byte[] { 99, 99, 99, 99 }, basePlayerPointer_ch, FirstGrenadeTypeAmountOffset);
+                            }
+                            ,
+                            15 => () => ApplyForce(0, 0, 0.1f),
                             22 => () =>
                             {
                                 DisabledHubParts.Add(Crosshair);
@@ -1812,26 +2074,35 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                                 InjectConditionalDamageMultiplier();
                             }
                             ,
+                            14 => () =>
+                            {
+                                TrySetIndirectByteArray(new byte[] { 0x2, 0x2, 0x2, 0x2 }, basePlayerPointer_ch, FirstGrenadeTypeAmountOffset);
+                            }
+                            ,
                             22 => () => RepairHUD(Crosshair)
                             ,
                             _ => () => { }
                             ,
                         };
 
+                        // Adapt the slot and offset to account for the script variable bit limits.
+                        // The variables are separated by 8 bytes in memory as declared in the script.
+                        int varOffset = (slot / MaxContinousScriptEffectSlotPerVar) * 8;
+                        int actualSlot = (slot % MaxContinousScriptEffectSlotPerVar);
                         var act = StartTimed(request,
                             () => true,// IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {startMessage}");
                                 additionalStartAction();
-                                return TrySetIndirectTimedEffectFlag(slot, 1);
+                                return TrySetIndirectTimedEffectFlag(actualSlot, 1, varOffset);
                             },
                             mutex);
 
                         act.WhenCompleted.Then(_ =>
                         {
                             additionalEndAction();
-                            TrySetIndirectTimedEffectFlag(slot, 0);
+                            TrySetIndirectTimedEffectFlag(actualSlot, 0, varOffset);
                             Connector.SendMessage(endMessage);
                         });
 
@@ -1992,6 +2263,32 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             }
         }
 
+        private void ApplyRandomForce(float maxX, float maxY, float maxZ, bool allowNegativeZ = false)
+        {
+            Random rng = new Random();
+            float x = GenerateRandomFloat(rng, maxX, true);
+            float y = GenerateRandomFloat(rng, maxY, true);
+            float z = GenerateRandomFloat(rng, maxZ, allowNegativeZ);
+
+            ApplyForce(x, y, z);
+        }
+
+        private float GenerateRandomFloat(Random rng, float max, bool allowNegative)
+        {
+            float random = (float)rng.NextDouble();
+
+            return allowNegative
+                ? random * max * 2 - max
+                : random * max;
+        }
+
+        private void ApplyForce(float x, float y, float z, bool relative = true)
+        {
+            TrySetIndirectFloat(x, basePlayerPointer_ch, XSpeedOffset, relative);
+            TrySetIndirectFloat(y, basePlayerPointer_ch, XSpeedOffset + 4, relative);
+            TrySetIndirectFloat(z, basePlayerPointer_ch, XSpeedOffset + 8, relative);
+        }
+
         #region Indirect Pointer Helpers
 
         /// <summary>
@@ -1999,9 +2296,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// </summary>
         /// <param name="bitOffset">Offset of the flag.</param>
         /// <param name="bitValue">1 or 0.</param>
+        /// <param name="variableOffset">As 30 bits are not enough, the script has multiple variables,
+        /// offset by a multiple of 8 with respect to the pointer.</param>
         /// <returns>True if the flag was set correctly.</returns>
         /// <exception cref="ArgumentOutOfRangeException">On invalid offset or bit value.</exception>
-        private bool TrySetIndirectTimedEffectFlag(int bitOffset, int bitValue)
+        private bool TrySetIndirectTimedEffectFlag(int bitOffset, int bitValue, int variableOffset = 0)
         {
             if (bitValue < 0 || bitValue > 1)
             {
@@ -2013,8 +2312,15 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 throw new ArgumentOutOfRangeException(nameof(bitValue));
             }
 
+            if (variableOffset % 8 != 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(variableOffset));
+            }
+
             if (VerifyIndirectPointer(scriptVarTimedEffectsPointerPointer, out AddressChain? valueRealPointer_ch))
             {
+                valueRealPointer_ch = valueRealPointer_ch.Offset(variableOffset);
+
                 if (!valueRealPointer_ch.TryGetInt(out int oldValue))
                 {
                     CcLog.Error($"Could not read flags value in address {valueRealPointer_ch.GetLong()}, memory may have been destroyed.");
@@ -2057,6 +2363,39 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             CcLog.Message("New value: " + newFlagsValue.ToString("X"));
 
             return newFlagsValue;
+        }
+
+        /// <summary>
+        /// Tries to get an array of bytes from an indirect pointer.
+        /// </summary>
+        /// <param name="valuePointerPointer_ch"> The indirect pointer.</param>
+        /// <param name="offset">Offset to apply to the direct pointer.</param>
+        /// <param name="byteAmount">How many bytes to retrieve.</param>
+        /// <param name="byteArray">Output variable.</param>
+        /// <returns>True if everything went right, false otherwise.</returns>
+        private bool TryGetIndirectByteArray(AddressChain valuePointerPointer_ch, int offset, int byteAmount, out byte[]? byteArray)
+        {
+            if (!VerifyIndirectPointer(valuePointerPointer_ch, out AddressChain? valueRealPointer_ch))
+            {
+                byteArray = null;
+                return false;
+            }
+
+            valueRealPointer_ch = valueRealPointer_ch.Offset(offset);
+            return valueRealPointer_ch.TryGetBytes(byteAmount, out byteArray);
+        }
+
+        /// <summary>
+        /// Byte array wrapper of <see cref="TrySetIndirectValue"/>.
+        /// </summary>
+        private bool TrySetIndirectByteArray(byte[] newValue, AddressChain valuePointerPointer_ch, int offset)
+        {
+            Func<AddressChain, (bool, byte[])> tryGetter
+                = (pointerPointer_ch) => (pointerPointer_ch.TryGetBytes(newValue.Length, out byte[] oldValue), oldValue);
+            Func<AddressChain, byte[], bool> trySetter = (pointerPointer_ch, newValue) => pointerPointer_ch.TrySetBytes(newValue);
+            Func<byte[], byte[], byte[]> adder = (a, b) => throw new NotImplementedException("Byte array addition is not supported.");
+
+            return TrySetIndirectValue<byte[]>(tryGetter, trySetter, adder, newValue, valuePointerPointer_ch, offset, false);
         }
 
         /// <summary>
