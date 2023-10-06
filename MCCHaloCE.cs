@@ -1,12 +1,15 @@
 ﻿//#define DEVELOPMENT
 
+using ConnectorLib.Exceptions;
 using ConnectorLib.Inject.AddressChaining;
 using ConnectorLib.Inject.VersionProfiles;
 using CrowdControl.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Timers;
@@ -60,6 +63,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private AddressChain halo1BaseAddress_ch;
 
         private long halo1BaseAddress;
+
+        private Process mccProcess = null;
+
+        // Set to true if we detect a game closure.
+        private bool wasGameClosed = true;
 
         // Points to the start of the player unit data structure.
         private AddressChain? basePlayerPointer_ch = null;
@@ -126,9 +134,15 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private float PlayerSpeedFactor = 1;
         private float OthersSpeedFactor = 1;
 
+        private bool ShouldInjectSpeed
+        { get { return PlayerSpeedFactor != 1 || OthersSpeedFactor != 1; } }
+
         private float PlayerReceivedDamageFactor = 1;
         private float OthersReceivedDamageFactor = 1;
         private bool InstakillEnemies = false;
+
+        private bool ShouldInjectDamageFactors
+        { get { return PlayerReceivedDamageFactor != 1 || OthersReceivedDamageFactor != 1 || InstakillEnemies; } }
 
         // Deactivation script code for all parts in the HUD
         private const int Crosshair = 10;
@@ -461,33 +475,54 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
         private void InitGame()
         {
-            SetHalo1BaseAddress();
+            CcLog.Message("INIT");
+            if (injectionCheckerTimer != null)
+            {
+                // Clear residual timers.
+                injectionCheckerTimer.Enabled = false;
+                injectionCheckerTimer = null;
+            }
+            //if (statusCheckerTimer != null)
+            //{
+            //    statusCheckerTimer.Enabled = false;
+            //    statusCheckerTimer = null;
+            //}
+
+            //SetHalo1BaseAddress();
             if (!DONT_OVERWRITE)
             {
+                //AbortAllInjection(true);
                 CreatePeriodicInjectionChecker();
+                //CreateStatusChecker();
             }
             else
             {
                 CcLog.Message("Debugging mode. Injections are not automatic.");
+                halo1BaseAddress_ch = AddressChain.ModuleBase(Connector, "halo1.dll");
+                if (!halo1BaseAddress_ch.Calculate(out long halo1BaseAddress))
+                {
+                    CcLog.Message("Could not get halo1.dll base address."); return;
+                }
             }
         }
 
         private void DeinitGame()
         {
-            AbortAllInjection();
+            CcLog.Message("DEINIT");
+            AbortAllInjection(true);
         }
 
-        private void SetHalo1BaseAddress()
-        {
-            halo1BaseAddress_ch = AddressChain.ModuleBase(Connector, "halo1.dll");
-            if (!halo1BaseAddress_ch.Calculate(out long halo1BaseAddress))
-            {
-                throw new Exception("Could not get halo1.dll base address");
-            }
+        //private void SetHalo1BaseAddress()
+        //{
+        //    halo1BaseAddress_ch = AddressChain.ModuleBase(Connector, "halo1.dll");
+        //    if (!halo1BaseAddress_ch.Calculate(out long halo1BaseAddress))
+        //    {
+        //        throw new Exception("Could not get halo1.dll base address");
+        //    }
 
-            this.halo1BaseAddress = halo1BaseAddress;
-            CcLog.Message("Halo 1 base address: " + halo1BaseAddress);
-        }
+        //    this.halo1BaseAddress = halo1BaseAddress;
+        //    CcLog.Message("Halo 1 base address: " + halo1BaseAddress);
+        //}
 
         #endregion init/deinit
 
@@ -496,6 +531,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // Activates the timer that periodically checks if code injections should be done, for instance, when going back to the main menu.
         private void CreatePeriodicInjectionChecker()
         {
+            CcLog.Message("Create periodic injection checker.");
             injectionCheckerTimer = new Timer(500);
             injectionCheckerTimer.Elapsed += OnPeriodicInjectionCheck;
             injectionCheckerTimer.AutoReset = true;
@@ -503,7 +539,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         }
 
         // Checks if the code injections should be done, by checking if an injection point still has its original code.
-        private bool IsInjectionNeeded()
+        private bool WereInjectionsOverwrittenByTheGameOrOS()
         {
             if (scriptVarInstantEffectsPointerPointer_ch == null)
             {
@@ -514,7 +550,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionPointOffset);
 
             // original instruction is 0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
-            // if it is there, the code has been reset and needs to be reinjected.
+            // if it is there, the code has been reset and needs to be reinjected. We assume that if one injection was reset, all were.
             byte[] originalInstruction = new byte[] { 0x48, 0x63, 0x42, 0x34 }; // <-- the original instruction at that address
             byte[] bytesAtInjectionPoint = scriptVarReadingInstruction_ch.GetBytes(4);
             if (bytesAtInjectionPoint.Length != 4)
@@ -534,26 +570,134 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             return true;
         }
 
-        // Inject all needed code.
+        // Inject all needed code, including both permanent injections and injections that only accur is specific state is not the default one.
         private void InjectAllHooks()
         {
+            CcLog.Message("Clearing all existing caves");
+            AbortAllInjection(false); // Destroy any old caves to prevent memory leaks.
+
+            CcLog.Message("(Re)injecting all hooks");
+
             InjectScriptHook();
             InjectPlayerBaseReader();
+
+            if (ShouldInjectDamageFactors) { InjectConditionalDamageMultiplier(); }
+            if (ShouldInjectDamageFactors) { InjectSpeedMultiplier(); }
         }
 
         // Called by the periodic timer.
         private static void OnPeriodicInjectionCheck(Object source, ElapsedEventArgs e)
         {
             injectionCheckerTimer.Enabled = false;
-
-            if (instance.IsInjectionNeeded())
+            try
             {
-                CcLog.Message("Injecting.");
-                instance.InjectAllHooks();
-                CcLog.Message("Injection complete.");
-            }
+                //CcLog.Message("Running timer");
+                if (instance == null)
+                {
+                    CcLog.Message("No effect pack instance."); return;
+                }
 
-            injectionCheckerTimer.Enabled = true;
+                if (instance.mccProcess == null || instance.mccProcess.HasExited)
+                {
+                    CcLog.Message(instance.mccProcess == null
+                        ? "Current process instance is null."
+                        : $"Current process instance with ID {instance.mccProcess.Id} has exited.");
+                    CcLog.Message("Looking for new process.");
+
+                    var newMccProcess = Process.GetProcessesByName(ProcessName).Where(p => !p.HasExited).FirstOrDefault();
+                    if (newMccProcess == null)
+                    {
+                        CcLog.Message("New process not yet found.");
+                        return;
+                    }
+                    if (instance.mccProcess == null)
+                    {
+                        CcLog.Message($"Swapping null instance with instance with ID {newMccProcess.Id}");
+                    }
+                    else
+                    {
+                        CcLog.Message($"Swapping old exited instance with id {instance.mccProcess.Id} with instance with ID {newMccProcess.Id}");
+                    }
+
+                    ProcessModule halo1Module = null;
+                    foreach (ProcessModule module in newMccProcess.Modules)
+                    {
+                        //CcLog.Message(module.ModuleName);
+                        if (module.ModuleName == "halo1.dll")
+                        {
+                            halo1Module = module;
+                            CcLog.Message("Halo 1 base address is " + module.BaseAddress.ToString("X"));
+                            break;
+                        }
+                    }
+                    if (halo1Module == null)
+                    {
+                        CcLog.Message("Halo1.dll module was still not loaded. Retry.");
+                        return;
+                    }
+
+                    instance.mccProcess = newMccProcess;
+                    instance.halo1BaseAddress_ch = null;
+
+                    try
+                    {
+                        CcLog.Message("Disconnecting connector.");
+                        instance.Connector.Disconnect();
+                        CcLog.Message("Connecting connector.");
+                        instance.Connector.Connect();
+                    }
+                    catch (Exception exception) { CcLog.Error(exception, "Recconection failed."); }
+
+                    return;
+                }
+
+                try
+                {
+                    AddressChain asdf = AddressChain.ModuleBase(instance.Connector, "halo1.dll");
+                }
+                catch (Exception ex)
+                {
+                    CcLog.Error(ex, "Problem creating module base.");
+                }
+                AddressChain reCalculatedhalo1BaseAddress_ch = AddressChain.ModuleBase(instance.Connector, "halo1.dll");
+                try
+                {
+                    if (!reCalculatedhalo1BaseAddress_ch.Calculate(out long a))
+                    {
+                        CcLog.Message("Could not get halo1.dll base address."); return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    CcLog.Error(ex, "Problem calculating module base.");
+                }
+                if (!reCalculatedhalo1BaseAddress_ch.Calculate(out long reCalculatedhalo1BaseAddress))
+                {
+                    CcLog.Message("Could not get halo1.dll base address."); return;
+                }
+
+                //CcLog.Message("Current base address: " + reCalculatedhalo1BaseAddress.ToString("X"));
+                if (instance.halo1BaseAddress_ch == null || instance.halo1BaseAddress != reCalculatedhalo1BaseAddress)
+                {
+                    CcLog.Message(instance.halo1BaseAddress == null
+                        ? $"Halo 1 base address was null. Setting it to {reCalculatedhalo1BaseAddress.ToString("X")}."
+                        : $"Halo 1 base address has changed from {instance.halo1BaseAddress.ToString("X")} to {reCalculatedhalo1BaseAddress.ToString("X")}.");
+                    instance.halo1BaseAddress_ch = reCalculatedhalo1BaseAddress_ch;
+                    instance.halo1BaseAddress = reCalculatedhalo1BaseAddress;
+
+                    instance.InjectAllHooks();
+                }
+                else if (instance.WereInjectionsOverwrittenByTheGameOrOS())
+                {
+                    CcLog.Message("Injecting.");
+                    instance.InjectAllHooks();
+                    CcLog.Message("Injection complete.");
+                }
+            }
+            finally
+            {
+                injectionCheckerTimer.Enabled = true;
+            }
         }
 
         #endregion Autoinjecter
@@ -566,7 +710,15 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// </summary>
         private void InjectScriptHook()
         {
-            UndoInjection(ScriptVarPointerId);
+            try
+            {
+                UndoInjection(ScriptVarPointerId);
+            }
+            catch (Exception e)
+            {
+                CcLog.Error(e, "Undoing is causing a crash - scripthook.");
+            }
+
             CcLog.Message("Injecting script communication hook.---------------------------");
             // Original replaced bytes. Total length: 16 (0x10)
             //0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
@@ -657,7 +809,15 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// </summary>
         private void InjectPlayerBaseReader()
         {
-            UndoInjection(PlayerPointerId);
+            try
+            {
+                UndoInjection(PlayerPointerId);
+            }
+            catch (Exception e)
+            {
+                CcLog.Error(e, "Undoing player base injection caused a crash - player base reader.");
+            }
+
             CcLog.Message("Injecting player base reader.---------------------------");
             //byte[] shieldsReadingInstructionPattern = { 0xF3, 0x0F, 0x10, 0x96, 0x9C, 0x00, 0x00, 0x00 };
             //var valueReadingInstruction_ch = AddressChain.AOB(Connector, 0, shieldsReadingInstructionPattern, "xxxxxxxx", 0, ConnectorLib.ScanHint.ExecutePage).Cache();
@@ -1178,24 +1338,55 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// <param name="identifier"></param>
         private void UndoInjection(string identifier)
         {
+            int replacedByteRestoreErrors = 0;
+            int replacedByteRestoreErrorsUnfinishedInit = 0;
+
             foreach ((_, long injectionAddress, byte[] originalBytes) in ReplacedBytes.Where(x => x.Identifier == identifier))
             {
-                CcLog.Message("Undoing injection");
-                AddressChain.Absolute(Connector, injectionAddress).SetBytes(originalBytes);
+                try
+                {
+                    CcLog.Debug("Undoing injection");
+                    AddressChain.Absolute(Connector, injectionAddress).SetBytes(originalBytes);
+                }
+                catch (InitNotCompleteException ex)
+                {
+                    replacedByteRestoreErrorsUnfinishedInit++;
+                    replacedByteRestoreErrors++;
+                }
+                catch
+                {
+                    replacedByteRestoreErrors++;
+                }
             }
+
+            CcLog.Message($"{replacedByteRestoreErrors} sets of injected bytes were not replaced with the originals." +
+                $" Of those, {replacedByteRestoreErrorsUnfinishedInit} failed likely because AddressChain can't be used during deinit.");
 
             ReplacedBytes = ReplacedBytes.Where(x => x.Identifier != identifier).ToList();
 
+            int caveDeletionErrors = 0;
             foreach ((_, long caveAddress, int size) in CreatedCaves.Where(x => x.Identifier == identifier))
             {
-                CcLog.Message("Removing cave");
-                AddressChain.Absolute(Connector, caveAddress).SetBytes(Enumerable.Repeat((byte)0x00, size).ToArray());
-                FreeCave(ProcessName, new IntPtr(caveAddress), size);
+                try
+                {
+                    CcLog.Debug("Removing cave");
+                    AddressChain.Absolute(Connector, caveAddress).SetBytes(Enumerable.Repeat((byte)0x00, size).ToArray());
+                    FreeCave(ProcessName, new IntPtr(caveAddress), size);
+                }
+                catch
+                {
+                    caveDeletionErrors++;
+                }
+            }
+
+            if (caveDeletionErrors != 0)
+            {
+                CcLog.Message($"{caveDeletionErrors} caves could not be cleared. Most likely the memory was freed.");
             }
 
             CreatedCaves = CreatedCaves.Where(x => x.Identifier != identifier).ToList();
 
-            CcLog.Message("Undo complete");
+            CcLog.Debug("Undo complete");
         }
 
         /// <summary>
@@ -1356,10 +1547,16 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// <summary>
         /// Disables periodic injection checks, and undoes all current injections.
         /// </summary>
-        private void AbortAllInjection()
+        private void AbortAllInjection(bool disableCheckTimer)
         {
-            CcLog.Message("Disabling periodic injection check, restoring memory and freeing caves.");
-            injectionCheckerTimer.Enabled = false;
+            if (disableCheckTimer && injectionCheckerTimer != null)
+            {
+                CcLog.Message("Disabling periodic injection check.");
+                injectionCheckerTimer.Enabled = false;
+            }
+
+            CcLog.Message("Restoring memory and freeing caves.");
+
             foreach (var code in ReplacedBytes.Select(x => x.Identifier).Distinct())
             {
                 UndoInjection(code);
@@ -2107,7 +2304,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
                 case "abortallinjection":
                     {
-                        AbortAllInjection();
+                        AbortAllInjection(true);
                         break;
                     }
                 case "speedfactorinjection":
