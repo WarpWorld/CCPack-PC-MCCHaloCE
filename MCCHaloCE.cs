@@ -1,5 +1,6 @@
 ﻿//#define DEVELOPMENT
 
+using ConnectorLib;
 using ConnectorLib.Exceptions;
 using ConnectorLib.Inject.AddressChaining;
 using ConnectorLib.Inject.VersionProfiles;
@@ -7,11 +8,10 @@ using CrowdControl.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Timers;
 using CcLog = CrowdControl.Common.Log;
 using ConnectorType = CrowdControl.Common.ConnectorType;
@@ -55,6 +55,447 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         }
     }
 
+    public enum GameAction
+    {
+        Jump,
+        SwapGrenades,
+        Use,
+        Reload,
+        SwapWeapons,
+        Melee,
+        FlashlightToggle,
+        ThrowGrenade,
+        Fire,
+        Crouch,
+        ZoomHold,
+
+        //ZoomIn, // These two are kind of useless so I'm excluding them.
+        //ZoomOut,
+        RunForward,
+
+        RunBackwards,
+        StrafeLeft,
+        StrafeRight,
+
+        //ShowScore, // Unused in single player
+        Pause
+    }
+
+    public class KeybindData
+    {
+        // This uses Virutal-Key Codes https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+        private const int byteOffsetBetweenKeyEntries = 0x18;
+
+        public readonly int memoryOffsetFromJump; // How far away in memory it is from the first keybind. A multiple of the offset between entries, always.
+        public byte savedBinding = 0x0; // Stores the previous binding in case of a swap.
+        public byte currentBinding = 0x0; // What key is currently binded.
+        public byte alternativeBinding = 0x0; // Usually unused, except when I need to set multiple things to the same action, like on Berserker.      
+
+        public KeybindData(int numberOfKeyEntryOffsets)
+        {
+            this.memoryOffsetFromJump = numberOfKeyEntryOffsets * byteOffsetBetweenKeyEntries;
+        }
+
+        public bool IsInitialized()
+        {
+            return currentBinding != 0x0;
+        }
+
+        public bool IsCurrentlySwapped()
+        {
+            return savedBinding != 0x0;
+        }
+
+        public bool TrySwap(KeybindData swapPartner)
+        {
+            if (this.IsCurrentlySwapped() || swapPartner.IsCurrentlySwapped())
+            {
+                CcLog.Message("Attempted to swap an already swapped key");
+                return false;
+            }
+
+            byte currentPartnerBinding = swapPartner.currentBinding;
+            swapPartner.Swap(this.currentBinding);
+            this.Swap(currentPartnerBinding);
+
+            return true;
+        }
+
+        public bool TrySwap(byte newBinding)
+        {
+            if (this.IsCurrentlySwapped())
+            {
+                CcLog.Message("Attempted to swap an already swapped key");
+                return false;
+            }
+
+            this.Swap(newBinding);
+
+            return true;
+        }
+
+        public void Swap(byte newBinding)
+        {
+            this.savedBinding = this.currentBinding;
+            this.currentBinding = newBinding;
+        }
+
+        public void Restore()
+        {
+            if (IsCurrentlySwapped())
+            {
+                this.currentBinding = this.savedBinding;
+                this.savedBinding = 0x00;
+            }
+
+            this.alternativeBinding = 0x00;
+
+        }
+    }
+
+    // Important. Most functions just change the state in this class. You need to call UpdateKeyBindings to actually change the game bindings.
+    public class KeyManager
+    {
+        private const long FirstKeybindOffset = 0x2B05630;
+        private const byte UnbindKeycode = 0xE8; // This is an unassigned virtual key code, according to the documentation.
+
+        private static readonly HashSet<GameAction> MovementKeys = new HashSet<GameAction>
+        { GameAction.RunForward, GameAction.RunBackwards, GameAction.StrafeLeft, GameAction.StrafeRight };
+
+        // Does not include Pause
+        private Dictionary<GameAction, KeybindData> SwappableKeybinds = new()
+        {
+            { GameAction.Jump, new KeybindData(0) },
+            { GameAction.SwapGrenades, new KeybindData(1) },
+            { GameAction.Use, new KeybindData(2) },
+            { GameAction.Reload, new KeybindData(3) },
+            { GameAction.SwapWeapons, new KeybindData(4) },
+            { GameAction.Melee, new KeybindData(5) },
+            { GameAction.FlashlightToggle, new KeybindData(6) },
+            { GameAction.ThrowGrenade, new KeybindData(7) },
+            { GameAction.Fire, new KeybindData(8) },
+            { GameAction.Crouch, new KeybindData(9) },
+            { GameAction.ZoomHold, new KeybindData(10) },
+            { GameAction.RunForward, new KeybindData(16) },
+            { GameAction.RunBackwards, new KeybindData(17) },
+            { GameAction.StrafeLeft, new KeybindData(18) },
+            { GameAction.StrafeRight, new KeybindData(19) },
+        };
+
+        public ConnectorLib.IPCConnector connector;
+        public HIDConnector hidConnector;
+
+        public KeyManager()
+        {
+        }
+
+        public bool InputEmulationReady()
+        {
+            return hidConnector != null && hidConnector.Connected;
+        }
+
+        public bool ForceActionPressOnce(GameAction action)
+        {
+            if (!TryGetActionKeybindData(action, out var keybindData)){
+                CcLog.Message($"Could not force action {action}.");
+                return false;
+            }
+
+            SendKeyCodeNoChecks(keybindData.currentBinding, false);
+            WaitOneFrame();
+            SendKeyCodeNoChecks(keybindData.currentBinding, true);
+            return true;
+        }
+        
+        public bool DisableAction(GameAction action)
+        {
+            if (!TryGetActionKeybindData(action, out var keybindData))
+            {
+                CcLog.Message($"Could not disable action {action}.");
+                return false;
+            }
+
+            SendKeyCodeNoChecks(keybindData.currentBinding, true);
+            keybindData.Swap(UnbindKeycode);
+
+            return true;
+        }
+
+        // Swaps only one way.
+        public bool SetAlernativeBindingToOTherActions(GameAction doubleBindedAction, GameAction actionToAttach)
+        {
+            if (!TryGetActionKeybindData(doubleBindedAction, out var keyDataToModify)
+                || !TryGetActionKeybindData(actionToAttach, out var keyDatamerge))
+            {
+                CcLog.Message($"Could not attach action {actionToAttach}'s keybinding to " +
+                    $"action {doubleBindedAction} as alt binding, one of them does not exist");
+                return false;
+            }
+
+            CcLog.Message($"Binding to merge: {keyDatamerge.currentBinding}");
+            HIDConnector.VirtualKeyCode virtualKeyCode = (HIDConnector.VirtualKeyCode)keyDatamerge.currentBinding;
+            CcLog.Message($"Keycode to merge: {(byte)virtualKeyCode}");
+
+
+            keyDataToModify.alternativeBinding = (byte)virtualKeyCode;
+
+            return true;
+        }
+
+        public bool SwapActionWithArbitraryKeyCode(GameAction action, HIDConnector.VirtualKeyCode virtualKeyCode)
+        {
+            if (!TryGetActionKeybindData(action, out var keybindData))
+            {
+                CcLog.Message($"Could not swap action {action}'s keybinding to {virtualKeyCode}.");
+                return false;
+            }
+
+            CcLog.Message($"Swapping action {action} to code {virtualKeyCode}.");
+            return keybindData.TrySwap((byte)virtualKeyCode);
+        }
+
+        private bool TryGetActionKeybindData(GameAction action, out KeybindData actionKeybindData)
+        {
+            actionKeybindData = null;
+            if (!AreKeyBindsInitialized())
+            {
+                CcLog.Message("Keybinds are not yet initialized, I don't know what to press.");
+
+                return false;
+            }
+
+            if (!SwappableKeybinds.TryGetValue(action, out actionKeybindData))
+            {
+                CcLog.Message("Unknown action.");
+                return false;
+            }
+
+            return true;
+        }
+        public void ForceShortPause(int pauseDuratinInMs = 300)
+        {
+            SendPauseAction(false);
+            WaitOneFrame();
+            SendPauseAction(true);
+
+            Thread.Sleep(pauseDuratinInMs);
+
+            SendPauseAction(false);
+            WaitOneFrame();
+            SendPauseAction(true);
+        }
+
+        public void WaitOneFrame()
+        {
+            Thread.Sleep(33);
+        }
+
+        private void SendKeyCodeNoChecks(int keyCode, bool isKeyUp)
+        {            
+            HIDConnector.VirtualKeyCode virtualKeyCode = (HIDConnector.VirtualKeyCode)keyCode;
+
+            if (isKeyUp)
+            {
+                hidConnector.KeyUp(virtualKeyCode);
+                return;
+            }
+
+            hidConnector.KeyDown(virtualKeyCode);
+        }
+
+        private void SendPauseAction(bool isKeyUp)
+        {
+            if (isKeyUp)
+            {
+                hidConnector.KeyUp(HIDConnector.VirtualKeyCode.ESCAPE);
+                return;
+            }
+
+            hidConnector.KeyDown(HIDConnector.VirtualKeyCode.ESCAPE);
+        }
+
+        public bool SendAction(GameAction action, bool isKeyUp)
+        {
+            if (!AreKeyBindsInitialized())
+            {
+                throw new Exception("Keybinds are not yet initialized, I don't know what to press.");
+            }
+
+            if (!SwappableKeybinds.TryGetValue(action, out KeybindData data))
+            {
+                throw new Exception("Unknown action.");
+            }
+
+            SendKeyCodeNoChecks(data.currentBinding, isKeyUp);
+
+            return true;
+        }
+
+        public bool RestoreAllKeyBinds()
+        {
+            foreach (var value in SwappableKeybinds.Values)
+            {
+                value.Restore();
+            }
+
+            return true;
+        }
+
+        // TODO: Make this private and just have every binding check first if they need to do this.
+        public void GetKeyBindingsFromGameMemory(long halo1BaseAddress)
+        {
+            CcLog.Message("Loading key values from game memory.");
+            AddressChain basePointer = AddressChain.Absolute(this.connector, halo1BaseAddress + FirstKeybindOffset);
+            foreach (var kvp in SwappableKeybinds)
+            {
+                byte keyBind = basePointer.Offset(kvp.Value.memoryOffsetFromJump).GetByte();
+                kvp.Value.currentBinding = keyBind;
+
+                CcLog.Message($"Set {keyBind.ToString("X2")} for {kvp.Key}");
+            }
+        }
+
+
+        public bool ResetAlternativeBindingForAction(GameAction action, long halo1BaseAddress)
+        {
+            AddressChain basePointer = AddressChain.Absolute(this.connector, halo1BaseAddress + FirstKeybindOffset);
+            
+            if (!basePointer.Offset(SwappableKeybinds[action].memoryOffsetFromJump + 0x4).TrySetByte(0x00))
+            {
+                CcLog.Message("Could not overwrite alternate binding");
+                return false;
+            }
+
+            return true;
+        }
+
+        public bool UpdateGameMemoryKeyState(long halo1BaseAddress)
+        {
+            try
+            {
+                AddressChain basePointer = AddressChain.Absolute(this.connector, halo1BaseAddress + FirstKeybindOffset);
+                int errors = 0;
+                foreach (var kvp in SwappableKeybinds)
+                {
+                    if (!kvp.Value.IsInitialized())
+                    {
+                        continue;
+                    }
+
+                    CcLog.Message($"Overwriting {kvp.Value.savedBinding.ToString("X2")} with {kvp.Value.currentBinding.ToString("X2")}");
+
+                    if (!basePointer.Offset(kvp.Value.memoryOffsetFromJump).TrySetByte(kvp.Value.currentBinding))
+                    {
+                        errors++;
+                    }
+
+                    if (kvp.Value.alternativeBinding != 0x00)
+                    {
+                        CcLog.Message($"Writing binding {kvp.Value.alternativeBinding} on offset {kvp.Value.memoryOffsetFromJump + 4} for action {kvp.Key}");
+                        if (!basePointer.Offset(kvp.Value.memoryOffsetFromJump + 0x4).TrySetByte(kvp.Value.alternativeBinding))
+                        {
+                            errors++;
+                        }
+                    }
+                }
+
+                if (errors > 0)
+                {
+                    CcLog.Message($"Could not update the state of {errors} keybinds.");
+                    return false;
+                }
+            }
+            catch (Exception e)
+            {
+                CcLog.Error(e, "Failure while updating key state.");
+            }
+
+            return true;
+        }
+
+        public bool RandomizeNonRunningKeys(long halo1BaseAddress)
+        {
+            if (!EnsureKeybindsInitialized(halo1BaseAddress))
+            {
+                CcLog.Message("Could not randomize, keybinds are not initialzied.");
+                return false;
+            }
+
+            return ShuffleControls(SwappableKeybinds.Keys.Except(MovementKeys).ToList());
+        }
+
+        public bool ReverseMovementKeys(long halo1BaseAddress)
+        {
+            try
+            {
+                if (!EnsureKeybindsInitialized(halo1BaseAddress))
+                {
+                    CcLog.Message("Could not reverse keys, keybinds are not initialzied.");
+                    return false;
+                }
+
+                return
+                    SwappableKeybinds[GameAction.RunForward].TrySwap(SwappableKeybinds[GameAction.RunBackwards])
+                    && SwappableKeybinds[GameAction.StrafeLeft].TrySwap(SwappableKeybinds[GameAction.StrafeRight]);
+            }
+            catch (Exception e)
+            {
+                CcLog.Error(e, "Failure while swapping movement keys.");
+                return false;
+            }
+        }
+
+        public bool AreKeyBindsInitialized()
+        {
+            if (!SwappableKeybinds.First().Value.IsInitialized())
+            {
+                CcLog.Message("Keybinds are not yet initialized.");
+                return false;
+            };
+
+            return true;
+        }
+
+        public bool EnsureKeybindsInitialized(long halo1BaseAddress)
+        {
+            if (hidConnector == null)
+            {
+                CcLog.Message("HIDConnector was null.");
+                return false;
+            }
+            if (!AreKeyBindsInitialized())
+            {
+                GetKeyBindingsFromGameMemory(halo1BaseAddress);
+            }
+
+            return AreKeyBindsInitialized();
+        }
+
+        // Swaps a control with a random one, not repeating.
+        private bool ShuffleControls( List<GameAction> actions)
+        {
+            Random rng = new Random();
+
+            GameAction firstAction = actions[rng.Next(actions.Count)];
+            byte firstActionKeyCode = SwappableKeybinds[firstAction].currentBinding;
+            actions.Remove(firstAction);
+
+            GameAction lastPickedAction = firstAction;
+            while (actions.Count > 0)
+            {
+                GameAction pickedAction = actions[rng.Next(actions.Count)];
+                SwappableKeybinds[lastPickedAction].TrySwap(SwappableKeybinds[pickedAction].currentBinding);
+                lastPickedAction = pickedAction;
+                actions.Remove(lastPickedAction);
+            }
+
+            // Complete the loop.
+            SwappableKeybinds[lastPickedAction].TrySwap(firstActionKeyCode);
+
+            return true;
+        }
+    }
+
     public class MCCHaloCE : InjectEffectPack
     {
         private const string ProcessName = "MCC-Win64-Shipping";
@@ -66,20 +507,57 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
         private Process mccProcess = null;
 
-        // Set to true if we detect a game closure.
-        private bool wasGameClosed = true;
+        private void BringGameToForeground()
+        {
+            _ = SetForegroundWindow(mccProcess.MainWindowHandle);
+        }
 
         // Points to the start of the player unit data structure.
         private AddressChain? basePlayerPointer_ch = null;
+
+        private bool IsProcessReady = false;
 
         // Points to where the injected code store the variables we use to communicate with the H1 scripts.
         private AddressChain? scriptVarInstantEffectsPointerPointer_ch = null;
 
         // Note: This points to the first var. Any others will be referred using a multiple of 8 offset on the value pointed by this one.
-        private AddressChain? scriptVarTimedEffectsPointerPointer = null;
+        private AddressChain? scriptVarTimedEffectsPointerPointer_ch = null;
+
+        // Points to the var that is constantly changed while in gameplay and not when not in gameplay.
+        private AddressChain? isInGameplayPollingPointer = null;
+
+        private long previousGamplayPollingValue = 69420;
+        private bool currentlyInGameplay = false;
+
+        private bool IsInGameplayCheck()
+        {
+            if (isInGameplayPollingPointer == null)
+            {
+                CcLog.Message("Gameplay polling pointer is null");
+                return false;
+            }
+
+            if (!isInGameplayPollingPointer.TryGetLong(out long value))
+            {
+                CcLog.Message("Could not retrieve the gameplay polling variable.");
+
+                return false;
+            }
+
+            if (value == previousGamplayPollingValue)
+            {
+                CcLog.Debug("Gameplay polling pointer is unchanged, currently " + value);
+                return false;
+            }
+
+            previousGamplayPollingValue = value;
+            CcLog.Debug("Gameplay polling pointer changed to " + value);
+
+            return true;
+        }
 
         // Periodically checks if injections are needed.
-        private static Timer injectionCheckerTimer;
+        private static System.Timers.Timer injectionCheckerTimer;
 
         // Allows us to access the instance form the timer static methods.
         private static MCCHaloCE instance;
@@ -111,12 +589,19 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private const string OnCreateGameEngine = "oncreategameengine";
         private const string SpeedFactorId = "speedfactor";
         private const string UnstableAirtimeId = "unstableAirtime";
+        private const string IsInGameplayPollingId = "isInGameplayPollingId";
 
         #endregion Memory Identifiers
 
         #region Injection Offsets
 
-        private const long ScriptInjectionPointOffset = 0xACC0E9;
+        private const long PlayerBasePointerInjectionOffset = 0xC50557;
+        private const long ScriptInjectionOffset = 0xACC0E9;
+        private const long ConditionalDamageInjection_ShieldsOffset = 0xba0475;
+        private const long ConditionalDamageInjection_HealthOffset = 0xb9fdf3;
+        private const long SpeedModifierInjectionOffset = 0xB35E81;
+        private const long UnstableAirtimeInjectionOffset = 0xBB422E;
+        private const long IsInGameplayPollInjectionOffset = 0xBB331D;//0xCCA28F;
 
         // Player pointer offsets:
 
@@ -179,6 +664,10 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         public const string MovementCategory = "Movement";
         public const string OdditiesCategory = "Oddities";
         public const string VisibilityAndHudCategory = "Visibility and HUD";
+        public const string KeyManipulation = "Controls override";
+        public const string UnclassifiedInfernoStuff = "unclassified inferno stuff";
+
+        private KeyManager keyManager;
 
         public override EffectList Effects => new List<Effect> {
             // Player stats change
@@ -341,123 +830,45 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             new("HUD technician", "oneshotscripteffect_14") { Category = VisibilityAndHudCategory,
                 Description = "Make every part of the HUD visible again." },
 
+            // Key manipulation.
+            new("Crab rave", "crabrave") { Category = KeyManipulation, Duration = 15,
+                Description = "You're a crab, John. Move sideways only." },
+            new("Moonwalk", "moonwalk") { Category = KeyManipulation, Duration = 15,
+                Description = "Force to walk backwards." },
+            new("Bunny hop", "forcerepeatedjump") { Category = KeyManipulation, Duration = 15,
+                Description = "Force repeated jumping." },
+            new("Rambo", "forcefire") { Category = KeyManipulation, Duration = 15,
+                Description = "Fire at will. The crowd's will!" },
+            new("Grenade out!", "forcegrenades") { Category = KeyManipulation, Duration = 15,
+                Description = "Let 'em have it! Yeah, frag 'em! Nade 'em!" },
+            new("Pacifist", "preventattacking") { Category = KeyManipulation, Duration = 15,
+                Description = "Do no harm." },
+            new("Reverse movement", "reversemovement") { Category = KeyManipulation, Duration = 15,
+                Description = "Severly confuse your legs." },
+            new("Randomize controls", "randomizecontrols") { Category = KeyManipulation, Duration = 15,
+                Description = "Randomly swap all non-walking controls" },
+            new("Berserker", "berserker") { Category = KeyManipulation, Duration = 15,
+                Description = "Rip and tear until it's done." },
+            new("Turret mode", "turretmode") { Category = KeyManipulation, Duration = 15,
+                Description = "Stay still, but still fire." },
+            new("Broken legs", "forcecrouch") { Category = KeyManipulation, Duration = 15,
+                Description = "Standing is hard." },
+
+            //// Inferno temporary stuff
+            //new("Double up", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
+            //    Description = "Duplicate all currently loaded AI." },
+            //new("Friendship is Mjolnir", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
+            //    Description = "Make all loaded AI friendly." },
+            //new("Externally screaming", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
+            //    Description = "All loaded AI won't stop screaming." },
+            //new("Roll for initiative", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
+            //    Description = "Spawn a D20 Grenade where the player is looking." },
+            //new("Black hole", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
+            //    Description = "Spawns a black hole." },
+            //new("Dance Dance till you're dead!", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
+            //    Description = "Force the player to dance" },
+
             // And that's enough for now.
-#if DEVELOPMENT
-            new("Test second var", "continuouseffect_30") {
-                Description = "Dev only. Used to verify the second var works as expected." },
-            new("Script effect 1", "oneshotscripteffectgeneric_1"),
-            new("Script effect 2", "oneshotscripteffectgeneric_2"),
-            new("Script effect 3", "oneshotscripteffectgeneric_3"),
-            new("Script effect 4", "oneshotscripteffectgeneric_4"),
-            new("Script effect 5", "oneshotscripteffectgeneric_5"),
-            new("Script effect 6", "oneshotscripteffectgeneric_6"),
-            new("Script effect 7", "oneshotscripteffectgeneric_7"),
-            new("Script effect 8", "oneshotscripteffectgeneric_8"),
-            new("Script effect 9", "oneshotscripteffectgeneric_9"),
-            new("Script effect 10", "oneshotscripteffectgeneric_10"),
-            new("Script effect 11", "oneshotscripteffectgeneric_11"),
-            new("Script effect 12", "oneshotscripteffectgeneric_12"),
-            new("Script effect 13", "oneshotscripteffectgeneric_13"),
-            new("Script effect 14", "oneshotscripteffectgeneric_14"),
-            new("Script effect 15", "oneshotscripteffectgeneric_15"),
-            new("Script effect 16", "oneshotscripteffectgeneric_16"),
-            new("Script effect 17", "oneshotscripteffectgeneric_17"),
-            new("Script effect 18", "oneshotscripteffectgeneric_18"),
-            new("Script effect 19", "oneshotscripteffectgeneric_19"),
-            new("Script effect 20", "oneshotscripteffectgeneric_20"),
-            new("Script effect 21", "oneshotscripteffectgeneric_21"),
-            new("Script effect 22", "oneshotscripteffectgeneric_22"),
-            new("Script effect 23", "oneshotscripteffectgeneric_23"),
-            new("Script effect 24", "oneshotscripteffectgeneric_24"),
-            new("Script effect 25", "oneshotscripteffectgeneric_25"),
-            new("Script effect 26", "oneshotscripteffectgeneric_26"),
-            new("Script effect 27", "oneshotscripteffectgeneric_27"),
-            new("Script effect 28", "oneshotscripteffectgeneric_28"),
-            new("Script effect 29", "oneshotscripteffectgeneric_29"),
-            new("Script effect 30", "oneshotscripteffectgeneric_30"),
-            new("Script effect 31", "oneshotscripteffectgeneric_31"),
-            new("Script effect 32", "oneshotscripteffectgeneric_32"),
-            new("Script effect 33", "oneshotscripteffectgeneric_33"),
-            new("Script effect 34", "oneshotscripteffectgeneric_34"),
-            new("Script effect 35", "oneshotscripteffectgeneric_35"),
-            new("Script effect 36", "oneshotscripteffectgeneric_36"),
-            new("Script effect 37", "oneshotscripteffectgeneric_37"),
-            new("Script effect 38", "oneshotscripteffectgeneric_38"),
-            new("Script effect 39", "oneshotscripteffectgeneric_39"),
-            new("Script effect 40", "oneshotscripteffectgeneric_40"),
-            new("Script effect 41", "oneshotscripteffectgeneric_41"),
-            new("Script effect 42", "oneshotscripteffectgeneric_42"),
-            new("Script effect 43", "oneshotscripteffectgeneric_43"),
-            new("Script effect 44", "oneshotscripteffectgeneric_44"),
-            new("Script effect 45", "oneshotscripteffectgeneric_45"),
-            new("Script effect 46", "oneshotscripteffectgeneric_46"),
-            new("Script effect 47", "oneshotscripteffectgeneric_47"),
-            new("Script effect 48", "oneshotscripteffectgeneric_48"),
-            new("Script effect 49", "oneshotscripteffectgeneric_49"),
-            new("Script effect 50", "oneshotscripteffectgeneric_50"),
-            new("Script effect 51", "oneshotscripteffectgeneric_51"),
-            new("Script effect 52", "oneshotscripteffectgeneric_52"),
-            new("Script effect 53", "oneshotscripteffectgeneric_53"),
-            new("Script effect 54", "oneshotscripteffectgeneric_54"),
-            new("Script effect 55", "oneshotscripteffectgeneric_55"),
-            new("Script effect 56", "oneshotscripteffectgeneric_56"),
-            new("Script effect 57", "oneshotscripteffectgeneric_57"),
-            new("Script effect 58", "oneshotscripteffectgeneric_58"),
-            new("Script effect 59", "oneshotscripteffectgeneric_59"),
-            new("Script effect 60", "oneshotscripteffectgeneric_60"),
-            new("Script effect 61", "oneshotscripteffectgeneric_61"),
-            new("Script effect 62", "oneshotscripteffectgeneric_62"),
-            new("Script effect 63", "oneshotscripteffectgeneric_63"),
-            new("Script effect 64", "oneshotscripteffectgeneric_64"),
-            new("Script effect 65", "oneshotscripteffectgeneric_65"),
-            new("Script effect 66", "oneshotscripteffectgeneric_66"),
-            new("Script effect 67", "oneshotscripteffectgeneric_67"),
-            new("Script effect 68", "oneshotscripteffectgeneric_68"),
-            new("Script effect 69", "oneshotscripteffectgeneric_69"),
-            new("Script effect 70", "oneshotscripteffectgeneric_70"),
-            new("Script effect 71", "oneshotscripteffectgeneric_71"),
-            new("Script effect 72", "oneshotscripteffectgeneric_72"),
-            new("Script effect 73", "oneshotscripteffectgeneric_73"),
-            new("Script effect 74", "oneshotscripteffectgeneric_74"),
-            new("Script effect 75", "oneshotscripteffectgeneric_75"),
-            new("Script effect 76", "oneshotscripteffectgeneric_76"),
-            new("Script effect 77", "oneshotscripteffectgeneric_77"),
-            new("Script effect 78", "oneshotscripteffectgeneric_78"),
-            new("Script effect 79", "oneshotscripteffectgeneric_79"),
-            new("Script effect 80", "oneshotscripteffectgeneric_80"),
-            new("Script effect 81", "oneshotscripteffectgeneric_81"),
-            new("Script effect 82", "oneshotscripteffectgeneric_82"),
-            new("Script effect 83", "oneshotscripteffectgeneric_83"),
-            new("Script effect 84", "oneshotscripteffectgeneric_84"),
-            new("Script effect 85", "oneshotscripteffectgeneric_85"),
-            new("Script effect 86", "oneshotscripteffectgeneric_86"),
-            new("Script effect 87", "oneshotscripteffectgeneric_87"),
-            new("Script effect 88", "oneshotscripteffectgeneric_88"),
-            new("Script effect 89", "oneshotscripteffectgeneric_89"),
-            new("Script effect 90", "oneshotscripteffectgeneric_90"),
-
-            new("Continuous effect 0", "continuouseffectgeneric_0") { Duration = TimeSpan.FromSeconds(7) },
-            new("Continuous effect 1", "continuouseffectgeneric_1") {Duration = TimeSpan.FromSeconds(7) },
-            new("Continuous effect 2", "continuouseffectgeneric_2") {Duration = TimeSpan.FromSeconds(7) },
-
-            new("Speed factor injection", "speedfactorinjection"),
-            new("Player pointer injection", "playerpointerinjection"),
-            new("Undo player pointer injection", "undoplayerpointerinjection"),
-            new("Damage conditional injection", "damageconditionalinjection"),
-            new("Undo damage conditional injection", "undodamageconditionalinjection"),
-            new("Unit structure locator, activate", "unitstructurelocatoractivate"),
-            new("Inject script hook", "injectscripthook"),
-            new("Undo script hook", "undoscripthook"),
-            new("Toggle injection check", "toggleinjectioncheck"),
-            new("Reset script communication variable", "resetscriptcommvar"),
-
-                        // old
-            new("Hyper Overshield", "hyperovershield"),
-            new("No shield", "noshield", ItemKind.Effect),
-            new("No shield recharge", "noshieldrecharge"),
-            new("Set to 1hp", "setto1hp"),
-            new("Heal", "heal"),
-#endif
         };
 
         #region init/deinit
@@ -471,15 +882,21 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             };
 
             instance = this;
+            keyManager = new KeyManager();
         }
 
         private void InitGame()
         {
+            this.keyManager.connector = Connector;
+            var hidConnector = new HIDConnector();
+            hidConnector.Connect(3, TimeSpan.FromSeconds(5));
+            this.keyManager.hidConnector = hidConnector;
             CcLog.Message("INIT");
             if (injectionCheckerTimer != null)
             {
                 // Clear residual timers.
                 injectionCheckerTimer.Enabled = false;
+                injectionCheckerTimer.Dispose();
                 injectionCheckerTimer = null;
             }
             //if (statusCheckerTimer != null)
@@ -492,7 +909,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             if (!DONT_OVERWRITE)
             {
                 //AbortAllInjection(true);
-                CreatePeriodicInjectionChecker();
+                CreatePeriodicStateChecker();
                 //CreateStatusChecker();
             }
             else
@@ -512,28 +929,29 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             AbortAllInjection(true);
         }
 
-        //private void SetHalo1BaseAddress()
-        //{
-        //    halo1BaseAddress_ch = AddressChain.ModuleBase(Connector, "halo1.dll");
-        //    if (!halo1BaseAddress_ch.Calculate(out long halo1BaseAddress))
-        //    {
-        //        throw new Exception("Could not get halo1.dll base address");
-        //    }
+        private void Debug_ManuallySetHalo1BaseAddress()
+        {
+            halo1BaseAddress_ch = AddressChain.ModuleBase(Connector, "halo1.dll");
+            if (!halo1BaseAddress_ch.Calculate(out long halo1BaseAddress))
+            {
+                throw new Exception("Could not get halo1.dll base address");
+            }
 
-        //    this.halo1BaseAddress = halo1BaseAddress;
-        //    CcLog.Message("Halo 1 base address: " + halo1BaseAddress);
-        //}
+            this.halo1BaseAddress = halo1BaseAddress;
+            CcLog.Message("Halo 1 base address: " + halo1BaseAddress);
+        }
 
         #endregion init/deinit
 
         #region Autoinjecter
 
         // Activates the timer that periodically checks if code injections should be done, for instance, when going back to the main menu.
-        private void CreatePeriodicInjectionChecker()
+        // Also sets the variable that determines if the game is in gameplay and not a menu/loading screen.
+        private void CreatePeriodicStateChecker()
         {
             CcLog.Message("Create periodic injection checker.");
-            injectionCheckerTimer = new Timer(500);
-            injectionCheckerTimer.Elapsed += OnPeriodicInjectionCheck;
+            injectionCheckerTimer = new System.Timers.Timer(500);
+            injectionCheckerTimer.Elapsed += OnPeriodicStateCheck;
             injectionCheckerTimer.AutoReset = true;
             injectionCheckerTimer.Enabled = true;
         }
@@ -547,7 +965,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 return true;
             }
 
-            var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionPointOffset);
+            var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionOffset);
 
             // original instruction is 0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
             // if it is there, the code has been reset and needs to be reinjected. We assume that if one injection was reset, all were.
@@ -580,13 +998,14 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
             InjectScriptHook();
             InjectPlayerBaseReader();
+            InjectIsInGameplayPolling();
 
             if (ShouldInjectDamageFactors) { InjectConditionalDamageMultiplier(); }
             if (ShouldInjectDamageFactors) { InjectSpeedMultiplier(); }
         }
 
         // Called by the periodic timer.
-        private static void OnPeriodicInjectionCheck(Object source, ElapsedEventArgs e)
+        private static void OnPeriodicStateCheck(Object source, ElapsedEventArgs e)
         {
             injectionCheckerTimer.Enabled = false;
             try
@@ -597,102 +1016,31 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     CcLog.Message("No effect pack instance."); return;
                 }
 
-                if (instance.mccProcess == null || instance.mccProcess.HasExited)
+                // If the process instance is missing or has exited, stop here until a new one is found and ready.
+                if (!VerifyOrFixProcessIsReady())
                 {
-                    CcLog.Message(instance.mccProcess == null
-                        ? "Current process instance is null."
-                        : $"Current process instance with ID {instance.mccProcess.Id} has exited.");
-                    CcLog.Message("Looking for new process.");
-
-                    var newMccProcess = Process.GetProcessesByName(ProcessName).Where(p => !p.HasExited).FirstOrDefault();
-                    if (newMccProcess == null)
-                    {
-                        CcLog.Message("New process not yet found.");
-                        return;
-                    }
-                    if (instance.mccProcess == null)
-                    {
-                        CcLog.Message($"Swapping null instance with instance with ID {newMccProcess.Id}");
-                    }
-                    else
-                    {
-                        CcLog.Message($"Swapping old exited instance with id {instance.mccProcess.Id} with instance with ID {newMccProcess.Id}");
-                    }
-
-                    ProcessModule halo1Module = null;
-                    foreach (ProcessModule module in newMccProcess.Modules)
-                    {
-                        //CcLog.Message(module.ModuleName);
-                        if (module.ModuleName == "halo1.dll")
-                        {
-                            halo1Module = module;
-                            CcLog.Message("Halo 1 base address is " + module.BaseAddress.ToString("X"));
-                            break;
-                        }
-                    }
-                    if (halo1Module == null)
-                    {
-                        CcLog.Message("Halo1.dll module was still not loaded. Retry.");
-                        return;
-                    }
-
-                    instance.mccProcess = newMccProcess;
-                    instance.halo1BaseAddress_ch = null;
-
-                    try
-                    {
-                        CcLog.Message("Disconnecting connector.");
-                        instance.Connector.Disconnect();
-                        CcLog.Message("Connecting connector.");
-                        instance.Connector.Connect();
-                    }
-                    catch (Exception exception) { CcLog.Error(exception, "Recconection failed."); }
-
+                    CcLog.Message("Process was not ready nor in a fixable wrong state yet.");
+                    instance.IsProcessReady = false;
                     return;
                 }
 
-                try
+                // Recalculate the base address of halo1.dll.
+                BaseHaloAddressResult addressResult = RecalculateBaseHaloAddress();
+                if (addressResult == BaseHaloAddressResult.Failure)
                 {
-                    AddressChain asdf = AddressChain.ModuleBase(instance.Connector, "halo1.dll");
-                }
-                catch (Exception ex)
-                {
-                    CcLog.Error(ex, "Problem creating module base.");
-                }
-                AddressChain reCalculatedhalo1BaseAddress_ch = AddressChain.ModuleBase(instance.Connector, "halo1.dll");
-                try
-                {
-                    if (!reCalculatedhalo1BaseAddress_ch.Calculate(out long a))
-                    {
-                        CcLog.Message("Could not get halo1.dll base address."); return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    CcLog.Error(ex, "Problem calculating module base.");
-                }
-                if (!reCalculatedhalo1BaseAddress_ch.Calculate(out long reCalculatedhalo1BaseAddress))
-                {
-                    CcLog.Message("Could not get halo1.dll base address."); return;
+                    CcLog.Message("Could not properly calculate the base address for halo1.dll.");
+                    instance.IsProcessReady = false;
+                    return;
                 }
 
-                //CcLog.Message("Current base address: " + reCalculatedhalo1BaseAddress.ToString("X"));
-                if (instance.halo1BaseAddress_ch == null || instance.halo1BaseAddress != reCalculatedhalo1BaseAddress)
+                if (addressResult == BaseHaloAddressResult.RecalculatedDifferentFromPrevious ||
+                    (addressResult == BaseHaloAddressResult.WasAlreadyCorrect && instance.WereInjectionsOverwrittenByTheGameOrOS()))
                 {
-                    CcLog.Message(instance.halo1BaseAddress == null
-                        ? $"Halo 1 base address was null. Setting it to {reCalculatedhalo1BaseAddress.ToString("X")}."
-                        : $"Halo 1 base address has changed from {instance.halo1BaseAddress.ToString("X")} to {reCalculatedhalo1BaseAddress.ToString("X")}.");
-                    instance.halo1BaseAddress_ch = reCalculatedhalo1BaseAddress_ch;
-                    instance.halo1BaseAddress = reCalculatedhalo1BaseAddress;
+                    instance.InjectAllHooks();
+                }
 
-                    instance.InjectAllHooks();
-                }
-                else if (instance.WereInjectionsOverwrittenByTheGameOrOS())
-                {
-                    CcLog.Message("Injecting.");
-                    instance.InjectAllHooks();
-                    CcLog.Message("Injection complete.");
-                }
+                instance.IsProcessReady = true;
+                instance.currentlyInGameplay = instance.IsInGameplayCheck();
             }
             finally
             {
@@ -700,13 +1048,173 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             }
         }
 
+        /// <summary>
+        /// Verifies that the game process exists, has a valid state, and is currently connected to the Connector.
+        /// If that's not the case, it will try to fix it.
+        ///
+        /// </summary>
+        /// <returns>False if it is not ready and it can't currently fix it, true otherwise.</returns>
+        private static bool VerifyOrFixProcessIsReady()
+        {
+            if (instance.mccProcess == null || instance.mccProcess.HasExited)
+            {
+                CcLog.Message(instance.mccProcess == null
+                    ? "Current process instance is null."
+                    : $"Current process instance with ID {instance.mccProcess.Id} has exited.");
+                CcLog.Message("Looking for new process.");
+
+                var newMccProcess = Process.GetProcessesByName(ProcessName).Where(p => !p.HasExited).FirstOrDefault();
+                if (newMccProcess == null)
+                {
+                    CcLog.Message("New process not yet found.");
+                    return false;
+                }
+                if (instance.mccProcess == null)
+                {
+                    CcLog.Message($"Swapping null instance with instance with ID {newMccProcess.Id}");
+                }
+                else
+                {
+                    CcLog.Message($"Swapping old exited instance with id {instance.mccProcess.Id} with instance with ID {newMccProcess.Id}");
+                }
+
+                ProcessModule halo1Module = null;
+                foreach (ProcessModule module in newMccProcess.Modules)
+                {
+                    //CcLog.Message(module.ModuleName);
+                    if (module.ModuleName == "halo1.dll")
+                    {
+                        halo1Module = module;
+                        CcLog.Message("Halo 1 base address is " + module.BaseAddress.ToString("X"));
+                        break;
+                    }
+                }
+                if (halo1Module == null)
+                {
+                    CcLog.Message("Halo1.dll module was still not loaded. Retry.");
+                    return false;
+                }
+
+                instance.mccProcess = newMccProcess;
+                instance.halo1BaseAddress_ch = null;
+
+                try
+                {
+                    CcLog.Message("Disconnecting connector.");
+                    instance.Connector.Disconnect();
+                    CcLog.Message("Connecting connector.");
+                    instance.Connector.Connect();
+                }
+                catch (Exception exception) { CcLog.Error(exception, "Recconection failed."); }
+            }
+
+            return true;
+        }
+
+        private enum BaseHaloAddressResult
+        {
+            Failure, // Could not be calculated.
+            RecalculatedDifferentFromPrevious, // Was calculated, but it changed, most likely due to a process change.
+            WasAlreadyCorrect, // Was calculated, and was the same as the previous one.
+        }
+
+        private static BaseHaloAddressResult RecalculateBaseHaloAddress()
+        {
+            try
+            {
+                AddressChain asdf = AddressChain.ModuleBase(instance.Connector, "halo1.dll");
+            }
+            catch (Exception ex)
+            {
+                CcLog.Error(ex, "Problem creating module base.");
+            }
+            AddressChain reCalculatedhalo1BaseAddress_ch = AddressChain.ModuleBase(instance.Connector, "halo1.dll");
+            try
+            {
+                if (!reCalculatedhalo1BaseAddress_ch.Calculate(out long a))
+                {
+                    CcLog.Message("Could not get halo1.dll base address."); return BaseHaloAddressResult.Failure;
+                }
+            }
+            catch (Exception ex)
+            {
+                CcLog.Error(ex, "Problem calculating module base.");
+            }
+            if (!reCalculatedhalo1BaseAddress_ch.Calculate(out long reCalculatedhalo1BaseAddress))
+            {
+                CcLog.Message("Could not get halo1.dll base address."); return BaseHaloAddressResult.Failure;
+            }
+
+            //CcLog.Message("Current base address: " + reCalculatedhalo1BaseAddress.ToString("X"));
+            if (instance.halo1BaseAddress_ch == null || instance.halo1BaseAddress != reCalculatedhalo1BaseAddress)
+            {
+                CcLog.Message(instance.halo1BaseAddress == null
+                    ? $"Halo 1 base address was null. Setting it to {reCalculatedhalo1BaseAddress.ToString("X")}."
+                    : $"Halo 1 base address has changed from {instance.halo1BaseAddress.ToString("X")} to {reCalculatedhalo1BaseAddress.ToString("X")}.");
+                instance.halo1BaseAddress_ch = reCalculatedhalo1BaseAddress_ch;
+                instance.halo1BaseAddress = reCalculatedhalo1BaseAddress;
+
+                return BaseHaloAddressResult.RecalculatedDifferentFromPrevious;
+            }
+
+            return BaseHaloAddressResult.WasAlreadyCorrect;
+        }
+
         #endregion Autoinjecter
 
         #region Injecters
 
         /// <summary>
+        /// Inserts code that constantly writes to a variable, increasing it weach time. The code is executed every frame of gameplay,
+        /// so we can use it to deduce if we are in gameplay (it changes constantly)
+        /// or does not change/it's pointer does not exist (menu, pause, or loading screen).
+        /// </summary>
+        private void InjectIsInGameplayPolling()
+        {
+            //Debug_ManuallySetHalo1BaseAddress();
+            UndoInjection(IsInGameplayPollingId);
+            CcLog.Message("Injecting polling to know if we are in gameplay.---------------------------");
+
+            // Original bytes. Total length: 0x13
+            //halo1.dll + BB331D - 44 3B CE   - cmp r9d,esi
+            //halo1.dll + BB3320 - 48 0F44 C1 - cmove rax,rcx
+            //halo1.dll + BB3324 - F2 0F10 00 - movsd xmm0,[rax]
+            //halo1.dll + BB3328 - F2 0F11 85 B0030000 - movsd[rbp + 000003B0],xmm0
+
+            AddressChain onlyRunOnGameplayInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + IsInGameplayPollInjectionOffset);
+            int bytesToReplaceLength = 0x13;
+
+            (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(onlyRunOnGameplayInstruction_ch, bytesToReplaceLength);
+            ReplacedBytes.Add((IsInGameplayPollingId, injectionAddress, originalBytes));
+
+            CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
+
+            IntPtr isInGameplayPollPointerPointer = CreateCodeCave(ProcessName, 8);
+            CreatedCaves.Add((IsInGameplayPollingId, (long)isInGameplayPollPointerPointer, 8));
+            CcLog.Message("Polling var pointer: " + ((long)isInGameplayPollPointerPointer).ToString("X"));
+            isInGameplayPollingPointer = AddressChain.Absolute(Connector, (long)isInGameplayPollPointerPointer);
+
+            var variableWriter = new byte[]
+            {
+            0x50, // push rax
+            0x48, 0xA1 }.AppendNum((long)isInGameplayPollPointerPointer).Append( // mov rax, [var]
+            0x48, 0x83, 0XC0, 0X01, // add rax, 1
+            0x48, 0xA3).AppendNum((long)isInGameplayPollPointerPointer).Append( // mov [var], rax
+            0x58);// pop rax
+
+            byte[] fullCaveContents = variableWriter
+                .Concat(originalBytes)
+                .Concat(GenerateJumpBytes(injectionAddress + bytesToReplaceLength, bytesToReplaceLength)).ToArray();
+
+            long cavePointer = CodeCaveInjection(onlyRunOnGameplayInstruction_ch, bytesToReplaceLength, fullCaveContents);
+            CreatedCaves.Add((IsInGameplayPollingId, cavePointer, StandardCaveSizeBytes));
+
+            CcLog.Message("Injection of polling to know if we are in gameplay finished.----------------------");
+        }
+
+        /// <summary>
         /// Inserts code that writes pointers to the scripts variables, <see cref="scriptVarInstantEffectsPointerPointer_ch"/>
-        /// and <see cref="scriptVarTimedEffectsPointerPointer"/>, which allows the effect pack to communicate with the H1 scripts.
+        /// and <see cref="scriptVarTimedEffectsPointerPointer_ch"/>, which allows the effect pack to communicate with the H1 scripts.
         /// </summary>
         private void InjectScriptHook()
         {
@@ -726,7 +1234,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             //0x8B, 0x44, 0xC8, 0x04, // mov eax,[rax+rcx*8+04]
             //0x48, 0x83, 0xC4, 0x20, //add rsp, 20
             //0x5B, // pop rbx
-            var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionPointOffset);
+            var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionOffset);
             int bytesToReplaceLength = 0x10;
 
             (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(scriptVarReadingInstruction_ch, bytesToReplaceLength);
@@ -742,7 +1250,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
             CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
             scriptVarInstantEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVarPointerPointer);
-            scriptVarTimedEffectsPointerPointer = AddressChain.Absolute(Connector, (long)scriptVar2PointerPointer);
+            scriptVarTimedEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVar2PointerPointer);
 
             // This script, for each of our script communication variables, hooks to where it is read.
             // The injected code checks if the one read is the script var with its original value, and
@@ -821,7 +1329,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             CcLog.Message("Injecting player base reader.---------------------------");
             //byte[] shieldsReadingInstructionPattern = { 0xF3, 0x0F, 0x10, 0x96, 0x9C, 0x00, 0x00, 0x00 };
             //var valueReadingInstruction_ch = AddressChain.AOB(Connector, 0, shieldsReadingInstructionPattern, "xxxxxxxx", 0, ConnectorLib.ScanHint.ExecutePage).Cache();
-            var valueReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + 0xC50557);
+            var valueReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + PlayerBasePointerInjectionOffset);
 
             int bytesToReplaceLength = 0x17;
 
@@ -881,7 +1389,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                    ? new byte[] { 0x74, jumpLength } // je, skip player
                    : new byte[] { 0xEB, jumpLength }; // jmp, skip everything.
             }
-            var speedWritingInstr_ch = AddressChain.Absolute(Connector, halo1BaseAddress + 0xB35E84 - 0x3); //cmp ebx, -01. I take the cmp to avoid conflicts with my own Jccs.
+            var speedWritingInstr_ch = AddressChain.Absolute(Connector, halo1BaseAddress + SpeedModifierInjectionOffset); //cmp ebx, -01. I take the cmp to avoid conflicts with my own Jccs.
             int bytesToReplaceLength = 0x11;
 
             (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(speedWritingInstr_ch, bytesToReplaceLength);
@@ -965,7 +1473,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private bool InjectUnstableAirtime()
         {
             UndoInjection(UnstableAirtimeId);
-            var speedWritingInstr_ch = AddressChain.Absolute(Connector, halo1BaseAddress + 0xBB422E); //movsd [rbx+24],xmm0
+            var speedWritingInstr_ch = AddressChain.Absolute(Connector, halo1BaseAddress + UnstableAirtimeInjectionOffset); //movsd [rbx+24],xmm0
             int bytesToReplaceLength = 0xE;
             float speedFactor = 1.05f;
 
@@ -1014,7 +1522,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             bool instakillEnemies = InstakillEnemies;
             // Shields
             CcLog.Message("Injecting shields factor");
-            InjectSpecificConditionalDamageMultiplier(0xba0475, 0x0E,
+            InjectSpecificConditionalDamageMultiplier(ConditionalDamageInjection_ShieldsOffset, 0x0E,
                 0x15, // xmm2
                 new byte[] { 0x49, 0x8B, 0xCE }, // mov rcx, r14,
                     0x9a3 - 0xa0,                //a0: shields. 0x9a3: distance to the player discriminator
@@ -1022,7 +1530,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     instakillEnemies);
             // Health.
             CcLog.Message("Injecting health factor");
-            InjectSpecificConditionalDamageMultiplier(0xb9fdf3, 0x14,
+            InjectSpecificConditionalDamageMultiplier(ConditionalDamageInjection_HealthOffset, 0x14,
                 0x35, // xmm6
                 new byte[] { 0x48, 0x8B, 0xCB },// mov rcx, rbx
                 0x9a3, playerFactor, othersFactor,
@@ -1049,7 +1557,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// <param name="playerFactor">See <see cref="InjectConditionalDamageMultiplier"/>.</param>
         /// <param name="othersFactor">See <see cref="InjectConditionalDamageMultiplier"/>.</param>
         /// <param name="instakillEnemies">See <see cref="InjectConditionalDamageMultiplier"/>.</param>
-        private void InjectSpecificConditionalDamageMultiplier(int instructionOffset,
+        private void InjectSpecificConditionalDamageMultiplier(long instructionOffset,
             int bytesToReplaceLength,
             byte damageRegister,
             byte[] movPlayerPointingRegisterToRcxInstruction,
@@ -1110,54 +1618,6 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             dataPointer.Offset(8).SetFloat(ludicrousDamage);
         }
 
-#if DEVELOPMENT
-
-        /// <summary>
-        /// Debug function, used to extract pointers to units without and storing them in memory, instead of needing a breakpoint.
-        /// </summary>
-        private void InjectUnitDirectionsExtractor()
-        {
-            // Parameterize it later.
-            int unitTypeDiscriminatorOffset = 0x9a3;
-            int playerDiscriminator = 0x3f; // 63
-
-            // this is the previous instruction, so we can inject the jump without having to avoid overwriting a Jcc.
-            var onDamageHealthSubstractionInstr_ch = AddressChain.Absolute(Connector, halo1BaseAddress + 0xb9fdf3);
-            int bytesToReplaceLength = 0x14;
-
-            IntPtr unitStructurePointerPointer = CreateCodeCave(ProcessName, 8); // todo: change the offset to point to the structure start.
-            CreatedCaves.Add((PlayerPointerId, (long)unitStructurePointerPointer, 8));
-
-            (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(onDamageHealthSubstractionInstr_ch, bytesToReplaceLength);
-            ReplacedBytes.Add((OnDamageConditionalId, injectionAddress, originalBytes));
-            CcLog.Message($"Pointer to unit: {((long)unitStructurePointerPointer).ToString("X")}");
-
-            // Hooks to a place (a damage receiving function) that reads the pointer to the unit structure and stores it, unless it is the player's.
-            byte[] prependedBytes = new byte[]
-            {
-                0x51, // push rcx
-                0x48, 0x8b, 0xcb, // mov rcx, rbx
-                0x48, 0x81, 0xc1 }.AppendNum(unitTypeDiscriminatorOffset) // mov rcx, <discriminator offset>
-            .Append(
-                0x81, 0x39).AppendNum(playerDiscriminator) // cmp [rcx], <discriminator value>
-            .Append(
-                0x74).AppendRelativePointer("endOfPrependedBytes", 0x0F).Append( // je to original bytes
-                0x50, // push rax,
-                0x48, 0x8b, 0xc1, // mov rax, rcx
-                0x48, 0xA3).AppendNum((long)unitStructurePointerPointer) // mov rax to pointer location
-            .Append(
-                0x58, // pop rax
-                0x59  // pop rcx
-            );
-
-            byte[] caveBytes = prependedBytes.Concat(originalBytes).Concat(GenerateJumpBytes(injectionAddress + bytesToReplaceLength)).ToArray();
-            CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
-
-            long cavePointer = CodeCaveInjection(onDamageHealthSubstractionInstr_ch, bytesToReplaceLength, caveBytes);
-            CreatedCaves.Add((OnDamageConditionalId, cavePointer, StandardCaveSizeBytes));
-        }
-
-#endif
 
         #endregion Injecters
 
@@ -1531,17 +1991,40 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // TODO: Actually verify all is set.
         protected override bool IsReady(EffectRequest request)
         {
-            if (halo1BaseAddress != null)
+            if (!IsInGameplay())
             {
-                CcLog.Message("Ready!");
-                if (IsInGameplay())
-                {
-                    return true;
-                }
+                CcLog.Message("Not in gameplay");
+
+                return false;
             }
 
-            CcLog.Message("Not ready.");
-            return false;
+            var code = FinalCode(request).Split('_');
+
+            if (code[0] == "continuouseffect" && !VerifyIndirectPointerIsReady(scriptVarTimedEffectsPointerPointer_ch))
+            {
+                CcLog.Message("No timed script pointer found");
+            }
+
+            if (code[0] == "oneshotscripteffect" && !VerifyIndirectPointerIsReady(scriptVarInstantEffectsPointerPointer_ch))
+            {
+                CcLog.Message("No one shot script pointer found");
+                return false;
+            }
+
+            if (!VerifyIndirectPointerIsReady(basePlayerPointer_ch))
+            {
+                CcLog.Message("No player pointer found");
+                return false;
+            }
+
+            return IsProcessReady;
+        }
+
+        private bool VerifyIndirectPointerIsReady(AddressChain pointer)
+        {
+            return pointer != null
+                && pointer.TryGetLong(out long value)
+                && value != 0;
         }
 
         /// <summary>
@@ -1575,8 +2058,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
         private bool IsInGameplay()
         {
-            // TODO. Find a way to know if a player is paused, in the main menu, or a loading screen.
-            return true;
+            return currentlyInGameplay;
         }
 
         protected override void StartEffect(EffectRequest request)
@@ -1599,11 +2081,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "plus1":
                             case "minus1":
                                 bool give = code[1] == "plus1";
-                                TryEffect(request, IsInGameplay,
+                                TryEffect(request, () => IsReady(request),
                                     () => TrySetIndirectFloat(give ? 1 : -1, basePlayerPointer_ch, offset, true),
                                     () => Connector.SendMessage($"{request.DisplayViewer} {(give ? "boosted" : "weakened")} your shield")); break;
                             case "break":
-                                TryEffect(request, IsInGameplay,
+                                TryEffect(request, () => IsReady(request),
                                     () => TrySetIndirectFloat(0, basePlayerPointer_ch, offset, false),
                                     () => Connector.SendMessage($"{request.DisplayViewer} broke your shield.")); break;
                             default:
@@ -1620,11 +2102,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "no":
                             case "instant":
                                 bool hinder = code[1] == "no";
-                                RepeatAction(request, IsInGameplay,
+                                RepeatAction(request, () => IsReady(request),
                                     () => Connector.SendMessage($"{request.DisplayViewer}" +
                                         $" {(hinder ? "prevented your shield from recharging" : "gave you a fast regenerating shield.")}"),
                                     TimeSpan.FromSeconds(1),
-                                    IsInGameplay,
+                                    () => IsReady(request),
                                     TimeSpan.FromMilliseconds(500),
                                     () => TrySetIndirectShort(hinder ? Int16.MaxValue : (short)0, basePlayerPointer_ch, offset, false),
                                     TimeSpan.FromMilliseconds(500),
@@ -1646,7 +2128,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
                         int offset = 0x9C;
                         bool heal = code[1] == "1";
-                        TryEffect(request, IsInGameplay,
+                        TryEffect(request, () => IsReady(request),
                                     () => TrySetIndirectFloat(heal ? 1 : 0.01f, basePlayerPointer_ch, offset, false),
                                     () => Connector.SendMessage($"{request.DisplayViewer} {(heal ? "healed you." : "left you on your last legs.")}")); break;
                     }
@@ -1654,10 +2136,10 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     {
                         int offset = 0x9C;
                         RepeatAction(request,
-                                    () => true,
+                                    () => IsReady(request),
                                     () => Connector.SendMessage($"{request.DisplayViewer} gave you health regeneration."),
                                     TimeSpan.FromSeconds(1),
-                                    IsInGameplay,
+                                    () => IsReady(request),
                                     TimeSpan.FromMilliseconds(500),
                                     () => TrySetIndirectFloat(0.2f, basePlayerPointer_ch, offset, true),
                                     TimeSpan.FromMilliseconds(1000),
@@ -1672,7 +2154,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     {
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
                         bool give = code[1] == "give" || code[1] == "givenowarthog";
-                        TryEffect(request, IsInGameplay,
+                        TryEffect(request, () => IsReady(request),
                                     () =>
                                     {
                                         if (!TryGetIndirectByteArray(basePlayerPointer_ch, FirstGrenadeTypeAmountOffset, 4, out byte[] grenadeValues))
@@ -1744,7 +2226,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             HandleInvalidRequest(request); return;
                         }
-                        StartTimed(request, IsInGameplay,
+                        StartTimed(request, () => IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -1793,7 +2275,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             HandleInvalidRequest(request); return;
                         }
-                        StartTimed(request, IsInGameplay,
+                        StartTimed(request, () => IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -1819,7 +2301,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     }
                 case "unstableairtime":
                     {
-                        StartTimed(request, IsInGameplay,
+                        StartTimed(request, () => IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} aggressively suggest you stay grounded.");
@@ -1869,7 +2351,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             HandleInvalidRequest(request); return;
                         }
-                        StartTimed(request, IsInGameplay,
+                        StartTimed(request, () => IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -1919,7 +2401,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             HandleInvalidRequest(request); return;
                         }
-                        StartTimed(request, IsInGameplay,
+                        StartTimed(request, () => IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -1974,7 +2456,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             HandleInvalidRequest(request); return;
                         }
                         StartTimed(request,
-                            () => { return IsInGameplay() && PlayerReceivedDamageFactor == 1 && OthersReceivedDamageFactor == 1 && !InstakillEnemies; },
+                            () => { return IsReady(request) && PlayerReceivedDamageFactor == 1 && OthersReceivedDamageFactor == 1 && !InstakillEnemies; },
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -2009,7 +2491,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "shake":
                                 {
                                     bool shake = true; // if true, apply force. If false, remove forces.
-                                    RepeatAction(request, IsInGameplay,
+                                    RepeatAction(request, () => IsReady(request),
                                         () => Connector.SendMessage($"{request.DisplayViewer} is shaking you."),
                                         TimeSpan.FromSeconds(1),
                                         IsInGameplay,
@@ -2042,7 +2524,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "drunk":
                                 {
                                     bool shake = true; // if true, apply force. If false, remove forces.
-                                    RepeatAction(request, IsInGameplay,
+                                    RepeatAction(request, () => IsReady(request),
                                         () => Connector.SendMessage($"{request.DisplayViewer} gave you one too many drinks."),
                                         TimeSpan.FromSeconds(1),
                                         IsInGameplay,
@@ -2122,7 +2604,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             ,
                         };
 
-                        TryEffect(request, IsInGameplay,
+                        TryEffect(request, () => IsReady(request),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -2280,7 +2762,9 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         int varOffset = (slot / MaxContinousScriptEffectSlotPerVar) * 8;
                         int actualSlot = (slot % MaxContinousScriptEffectSlotPerVar);
                         var act = StartTimed(request,
-                            () => true,// IsReady(request),
+                            () => IsReady(request),
+                            () => IsReady(request),
+                            TimeSpan.FromMilliseconds(500),
                             () =>
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} {startMessage}");
@@ -2298,159 +2782,421 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
                         break;
                     }
-#if DEVELOPMENT
-
-                #region Manual injection
-
-                case "abortallinjection":
+                #region Controls Override
+                case "crabrave":
                     {
-                        AbortAllInjection(true);
-                        break;
-                    }
-                case "speedfactorinjection":
-                    {
-                        InjectSpeedMultiplier();
-                        break;
-                    }
-                case "toggleinjectioncheck":
-                    {
-                        injectionCheckerTimer.Enabled = !injectionCheckerTimer.Enabled;
-                        CcLog.Message("Timer is now " + (injectionCheckerTimer.Enabled ? "Enabled" : "Disabled"));
-                        break;
-                    }
-                case "injectscripthook":
-                    {
-                        InjectScriptHook();
-                        break;
-                    }
-                case "undoscripthook":
-                    {
-                        UndoInjection(ScriptVarPointerId);
-                        break;
-                    }
-                case "playerpointerinjection":
-                    {
-                        InjectPlayerBaseReader();
-                        break;
-                    }
-                case "undoplayerpointerinjection":
-                    {
-                        UndoInjection(PlayerPointerId);
-                        break;
-                    }
-                case "damageconditionalinjection":
-                    {
-                        InjectConditionalDamageMultiplier();
-                        break;
-                    }
-                case "undodamageconditionalinjection":
-                    {
-                        UndoInjection(OnDamageConditionalId);
-                        break;
-                    }
-                case "unitstructurelocatoractivate":
-                    {
-                        InjectUnitDirectionsExtractor();
-                        break;
-                    }
-
-                #endregion Manual injection
-
-                #region Player
-
-                case "hyperovershield":
-                    {
-                        CcLog.Message("Triggered hyperovershield");
-                        TrySetIndirectFloat(3.14f, basePlayerPointer_ch, 0xA0, false);
-                        break;
-                    }
-
-                case "noshield":
-                    {
-                        CcLog.Message("Triggered minimum shield");
-                        TrySetIndirectFloat(0.01f, basePlayerPointer_ch, 0xA0, false);
-                        break;
-                    }
-
-                case "noshieldrecharge":
-                    {
-                        // Note: this value gets reset when receiving damage.
-                        CcLog.Message("Triggered no shield recharge.");
-                        TrySetIndirectShort(Int16.MaxValue, basePlayerPointer_ch, 0xC0, false);
-                        break;
-                    }
-                case "setto1hp":
-                    {
-                        CcLog.Message("Pain inbound");
-                        TrySetIndirectFloat(0.01f, basePlayerPointer_ch, 0x9C, false);
-
-                        break;
-                    }
-                case "heal":
-                    {
-                        CcLog.Message("Healthy spartan");
-                        TrySetIndirectFloat(1f, basePlayerPointer_ch, 0x9C, false);
-
-                        break;
-                    }
-
-                #endregion Player
-
-                #region Scripting
-
-                case "oneshotscripteffectgeneric":
-                    {
-                        if (code.Length < 2 || !int.TryParse(code[1], out int slot))
-                        {
-                            CcLog.Error("Missing or incorrect slot number for one-shot script effect");
-                            break;
-                        }
-
-                        Connector.SendMessage($"{request.DisplayViewer} triggered one-shot effect {slot}.");
-                        SetScriptOneShotEffectVariable(slot);
-                        break;
-                    }
-                case "resetscriptcommvar":
-                    {
-                        SetScriptOneShotEffectVariable(789); break;
-                    }
-                case "continuouseffectgeneric":
-                    {
-                        if (code.Length < 2 || !int.TryParse(code[1], out int slot))
-                        {
-                            CcLog.Error("Missing or incorrect slot number for continuous script effect");
-                            break;
-                        }
-
-                        CcLog.Message(request);
-                        CcLog.Message(request.Duration);
-                        CcLog.Message(request.Duration.TotalMilliseconds);
-                        CcLog.Message(request.DisplayViewer);
-                        var act = StartTimed(request,
-                            () => true,// IsReady(request),
-                            () =>
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
                             {
-                                //Connector.SendMessage($"{request.DisplayViewer} triggered continous effect {slot}.");
-                                return TrySetIndirectTimedEffectFlag(slot, 1);
-                            },
-                            Guid.NewGuid().ToString());
 
-                        act.WhenCompleted.Then(_ =>
-                        {
-                            TrySetIndirectTimedEffectFlag(slot, 0);
-                            //Connector.SendMessage($"Continous effect {slot} ended.");
-                        });
+                                Connector.SendMessage($"{request.DisplayViewer} made you walk like a crab.");
+                                keyManager.DisableAction(GameAction.RunForward);
+                                keyManager.DisableAction(GameAction.RunBackwards);
+                                keyManager.DisableAction(GameAction.StrafeRight);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                return keyManager.SendAction(GameAction.StrafeLeft, false);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.SendAction(GameAction.StrafeLeft, true);
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"Crabness expunged.");
+                            });
+                        break;
+                    }                        
+                case "moonwalk":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+
+                                Connector.SendMessage($"{request.DisplayViewer} made your pronouns \"he/hee\".");
+                                keyManager.DisableAction(GameAction.RunForward);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                return keyManager.SendAction(GameAction.RunBackwards, false);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.SendAction(GameAction.RunBackwards, true);
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"Forward movement is now allowed.");
+                            });
                         break;
                     }
+                case "forcerepeatedjump":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
 
-                #endregion Scripting
+                                Connector.SendMessage($"{request.DisplayViewer} put some literal spring on your step.");                                
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                return keyManager.SendAction(GameAction.Jump, false);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
 
-#endif
+                                keyManager.SendAction(GameAction.Jump, true);
+                                Connector.SendMessage($"Floor is no longer lava.");
+                            });
+                        break;
+                    }
+                case "forcefire":
+                    {
+                        // This implementation is a bit underwhelming with the battery rifle, but hilarious with the plasma pistol.
+                        // Note: can't send mousedown events with hidConnector. But I can rebind the fire button temporarily.
+                        bool keyUp = true; // Used to alternate events on each frame.
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                if (!keyManager.SwapActionWithArbitraryKeyCode(GameAction.Fire, HIDConnector.VirtualKeyCode.NUMPAD0))
+                                {
+                                    Connector.SendMessage("Could not swap fire to an unused key.");
+                                }
 
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"{request.DisplayViewer} ordered to fire at will.");
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                keyUp = !keyUp;
+                                return keyManager.SendAction(GameAction.Fire, keyUp);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+
+                                BringGameToForeground();
+                                keyManager.SendAction(GameAction.Fire, true);
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"Trigger discipline is now available once more.");
+                            });
+                        break;
+                    }
+                case "forcegrenades":
+                    {
+                        bool keyUp = true;
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} told you to get rid of your grenades.");
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                keyUp = !keyUp;
+                                return keyManager.SendAction(GameAction.ThrowGrenade, keyUp);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+                                keyManager.SendAction(GameAction.ThrowGrenade, true);
+                                Connector.SendMessage($"Enough grenading, soldier!.");
+                            });
+                        break;
+                    }
+                case "preventattacking":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} tells you to take it easy, man.");
+                                keyManager.DisableAction(GameAction.Melee);
+                                keyManager.DisableAction(GameAction.Fire);
+                                keyManager.DisableAction(GameAction.ThrowGrenade);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => true,
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () => true,
+                            refreshInterval: TimeSpan.FromMilliseconds(1000),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"Violence is allowed again.");
+                            });
+                        break;                        
+                    }
+                case "reversemovement":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} confused your legs.");
+                                keyManager.ReverseMovementKeys(halo1BaseAddress);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => true,
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () => true,
+                            refreshInterval: TimeSpan.FromMilliseconds(1000),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"Legs are fine again.");
+                            });
+                        break;
+                    }
+                case "randomizecontrols":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} randomized your controls.");
+                                keyManager.RandomizeNonRunningKeys(halo1BaseAddress);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => true,
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () => true,
+                            refreshInterval: TimeSpan.FromMilliseconds(1000),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"Controls are sane again.");
+                            });
+                        break;
+                    }
+                case "turretmode":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} ordered you to stay put.");
+                                keyManager.DisableAction(GameAction.RunBackwards);
+                                keyManager.DisableAction(GameAction.RunForward);
+                                keyManager.DisableAction(GameAction.StrafeLeft);
+                                keyManager.DisableAction(GameAction.StrafeRight);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => true,
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () => true,
+                            refreshInterval: TimeSpan.FromMilliseconds(1000),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"You can move again.");
+                            });
+                        break;
+                    }
+                case "forcecrouch":
+                    {
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} broke your ankles.");
+                                if (!keyManager.SwapActionWithArbitraryKeyCode(GameAction.Crouch, HIDConnector.VirtualKeyCode.NUMPAD1))
+                                {
+                                    Connector.SendMessage("Could not swap crouch to an unused key.");
+                                }
+
+                                keyManager.DisableAction(GameAction.Jump);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                return keyManager.SendAction(GameAction.Crouch, false);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "controlsoverride").WhenCompleted.Then((task) =>
+                            {
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.SendAction(GameAction.Crouch, true);
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"You can move normally again.");
+                            });
+                        break;
+                    }
+                case "berserker":
+                    {
+                        int deathlessSlot = 25;
+                        int oneShotOneKillSlot = 24;
+
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} told you to RIP AND TEAR.");
+                                // Deathless effect
+                                TrySetIndirectTimedEffectFlag(25, 1);
+                                // Omnipotent effect
+                                TrySetIndirectTimedEffectFlag(24, 1);
+
+                                // Movement speed
+                                PlayerSpeedFactor = 1.5f;
+                                InjectSpeedMultiplier();
+
+                                // Keybinds
+                                keyManager.SetAlernativeBindingToOTherActions(GameAction.Melee, GameAction.Fire);                                
+                                keyManager.DisableAction(GameAction.Fire);
+                                keyManager.DisableAction(GameAction.ThrowGrenade);
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(1000),
+                            refreshAction: () =>
+                            {
+                                // Deathless effect
+                                TrySetIndirectTimedEffectFlag(25, 1);
+                                // Omnipotent effect
+                                TrySetIndirectTimedEffectFlag(24, 1);
+                                return true;
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: new string[] { "controlsoverride", "playerSpeed", "playerDamageReceived", "ammo", "othersDamageReceived" })
+                            .WhenCompleted.Then((task) =>
+                            {
+                                // Repair health and shields.
+                                TrySetIndirectFloat(1, basePlayerPointer_ch, 0xA0, false);
+                                TrySetIndirectFloat(1, basePlayerPointer_ch, 0x9C, false);
+                                
+                                // Deathless remove
+                                TrySetIndirectTimedEffectFlag(25, 0);
+                                // Omnipotent effect
+                                TrySetIndirectTimedEffectFlag(24, 0);
+
+                                // Movement speed
+                                PlayerSpeedFactor = 1;
+                                if (OthersSpeedFactor != 1)
+                                {
+                                    InjectSpeedMultiplier();
+                                }
+                                else
+                                {
+                                    UndoInjection(SpeedFactorId);
+                                }
+
+                                // Keybinds
+                                keyManager.RestoreAllKeyBinds();
+                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
+                                keyManager.ResetAlternativeBindingForAction(GameAction.Melee, halo1BaseAddress);
+                                BringGameToForeground();
+                                keyManager.ForceShortPause();
+                                Connector.SendMessage($"You can calm down now.");
+                            });
+                        break;
+                    }                    
+                #endregion Controls Override
                 default:
                     CcLog.Message("Triggered nothing");
                     break;
-            }
+            } 
         }
 
         private void ApplyRandomForce(float maxX, float maxY, float maxZ, bool allowNegativeZ = false)
@@ -2507,7 +3253,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 throw new ArgumentOutOfRangeException(nameof(variableOffset));
             }
 
-            if (VerifyIndirectPointer(scriptVarTimedEffectsPointerPointer, out AddressChain? valueRealPointer_ch))
+            if (VerifyIndirectPointer(scriptVarTimedEffectsPointerPointer_ch, out AddressChain? valueRealPointer_ch))
             {
                 valueRealPointer_ch = valueRealPointer_ch.Offset(variableOffset);
 
@@ -2774,8 +3520,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
         private static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, int dwSize, int dwFreeType);
 
+        [DllImport("User32.dll")]
+        public static extern int SetForegroundWindow(IntPtr point);
+
         #endregion Imports
-    }
+    }    
 
     /* Notes:
      * When using data in the cave, the jump is calculated by the cave data offset - the offset of the next instruction.
