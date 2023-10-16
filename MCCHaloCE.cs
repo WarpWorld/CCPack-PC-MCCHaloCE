@@ -189,6 +189,116 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         {
         }
 
+        public enum MouseEffect
+        {
+            LeftDown, LeftUp, ForceToFeet
+        }
+
+        [Flags]
+        public enum MouseEventFlags
+        {
+            MOUSEEVENTF_MOVE = 0x0001,
+            MOUSEEVENTF_LEFTDOWN = 0x0002,
+            MOUSEEVENTF_LEFTUP = 0x0004,
+            MOUSEEVENTF_RIGHTDOWN = 0x0008,
+            MOUSEEVENTF_RIGHTUP = 0x0010,
+            MOUSEEVENTF_MIDDLEDOWN = 0x0020,
+            MOUSEEVENTF_MIDDLEUP = 0x0040,
+            MOUSEEVENTF_XDOWN = 0x0080,
+            MOUSEEVENTF_XUP = 0x0100,
+            MOUSEEVENTF_WHEEL = 0x0800,
+            MOUSEEVENTF_HWHEEL = 0x1000,
+            MOUSEEVENTF_MOVE_NOCOALESCE = 0x2000,
+            MOUSEEVENTF_VIRTUALDESK = 0x4000,
+            MOUSEEVENTF_ABSOLUTE = 0x8000,
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MouseInput
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        public struct Input
+        {
+            public int type;
+            public InputUnion u;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        public struct InputUnion
+        {
+            [FieldOffset(0)] public MouseInput mi;
+            [FieldOffset(0)] public KeyboardInput ki;
+            [FieldOffset(0)] public readonly HardwareInput hi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct KeyboardInput
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public readonly uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct HardwareInput
+        {
+            public readonly uint uMsg;
+            public readonly ushort wParamL;
+            public readonly ushort wParamH;
+        }
+
+        [Flags]
+        public enum InputType
+        {
+            Mouse = 0,
+            Keyboard = 1,
+            Hardware = 2
+        }
+
+        public static void SendMouseMove(int dx, int dy)
+        {
+            MouseInput mouseInput = new MouseInput // as per https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput
+            {
+                dwFlags = (uint)MouseEventFlags.MOUSEEVENTF_MOVE,
+                dx = dx,
+                dy = dy,
+            };
+
+            Input[] inputs =
+            {
+                new Input
+                {
+                    type = (int) InputType.Mouse,
+                    u = new InputUnion
+                    {
+                        mi = mouseInput,
+                    }
+                }
+            };
+
+            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input)));
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
+
+        public bool ForceMouseMove(int x, int y)
+        {
+            SendMouseMove(x, y);
+
+
+            return true;
+        }
+
         public bool InputEmulationReady()
         {
             return hidConnector != null && hidConnector.Connected;
@@ -590,6 +700,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private const string SpeedFactorId = "speedfactor";
         private const string UnstableAirtimeId = "unstableAirtime";
         private const string IsInGameplayPollingId = "isInGameplayPollingId";
+        private const string LevelSkipperId = "levelSkipperId";
 
         #endregion Memory Identifiers
 
@@ -601,7 +712,12 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         private const long ConditionalDamageInjection_HealthOffset = 0xb9fdf3;
         private const long SpeedModifierInjectionOffset = 0xB35E81;
         private const long UnstableAirtimeInjectionOffset = 0xBB422E;
-        private const long IsInGameplayPollInjectionOffset = 0xBB331D;//0xCCA28F;
+
+        // Functions that are constantly read during gameplay, but not when paused, loading or on the main menu.
+        private const long IsInGameplayPollInjectionOffset1 = 0xBB331D;//0xCCA28F;
+        private const long IsInGameplayPollInjectionOffset2 = 0xAD1EA1;//0xCCA28F;
+
+        private const long NextLevelReadInstructionOffset = 0xAFA80E;
 
         // Player pointer offsets:
 
@@ -665,6 +781,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         public const string OdditiesCategory = "Oddities";
         public const string VisibilityAndHudCategory = "Visibility and HUD";
         public const string KeyManipulation = "Controls override";
+        public const string MouseManipulation = "Controls override - mouse";
         public const string UnclassifiedInfernoStuff = "unclassified inferno stuff";
 
         private KeyManager keyManager;
@@ -806,7 +923,9 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             new("This is awkward", "continuouseffect_12") { Category = OdditiesCategory, Duration = 15,
                 Description= "Prevents action by anyone for a bit."},
             new("Medusa-117", "continuouseffect_13") { Category = OdditiesCategory, Duration = 15,
-                Description = "Anyone that locks eyes with you will die."},
+                Description = "Anyone that looks at you with you will die."},
+            new("The Jerod Special", "movetohalo") { Category = OdditiesCategory, 
+                Description = "Visit the drum boi's home."},
 
             // Visibility and HUD
             new("Darkest stormy night", "continuouseffect_16") { Category = VisibilityAndHudCategory, Duration = 45,
@@ -830,7 +949,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             new("HUD technician", "oneshotscripteffect_14") { Category = VisibilityAndHudCategory,
                 Description = "Make every part of the HUD visible again." },
 
-            // Key manipulation.
+            // Key manipulation (I count mouse buttons as keys).
             new("Crab rave", "crabrave") { Category = KeyManipulation, Duration = 15,
                 Description = "You're a crab, John. Move sideways only." },
             new("Moonwalk", "moonwalk") { Category = KeyManipulation, Duration = 15,
@@ -853,6 +972,18 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 Description = "Stay still, but still fire." },
             new("Broken legs", "forcecrouch") { Category = KeyManipulation, Duration = 15,
                 Description = "Standing is hard." },
+
+            // Mouse manipulation.
+            new("Foot fetish", "forcemouse_down") { Category = MouseManipulation, Duration = 10,
+                Description = "Force the player to look down." },
+            new("Heavensward gaze", "forcemouse_up") { Category = MouseManipulation, Duration = 10,
+                Description = "Force the player to look up." },
+            new("S.P.E.E.N. protocol", "forcemouse_spin") { Category = MouseManipulation, Duration = 10,
+                Description = "Force to spin." },
+            new("Joycon drift", "forcemouse_drift") { Category = MouseManipulation, Duration = 10,
+                Description = "Slightly move the cursor constantly." },
+            new("Shaky hands", "forcemouseshake") { Category = MouseManipulation, Duration = 10,
+                Description = "Shake the crosshair." },
 
             //// Inferno temporary stuff
             //new("Double up", "oneshotscripteffect_14") { Category = UnclassifiedInfernoStuff,
@@ -999,6 +1130,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             InjectScriptHook();
             InjectPlayerBaseReader();
             InjectIsInGameplayPolling();
+            InjectLevelSkipper();
 
             if (ShouldInjectDamageFactors) { InjectConditionalDamageMultiplier(); }
             if (ShouldInjectDamageFactors) { InjectSpeedMultiplier(); }
@@ -1164,6 +1296,114 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
         #region Injecters
 
+        // Contains a long with the offset of the next map when using the level skipper. The offset for the first level is 1.
+        private AddressChain? nextMapOffset_ch = null;
+
+        private bool SetNextMap(int offset)
+        {
+            if (nextMapOffset_ch == null)
+            {
+                CcLog.Message("Map offset pointer is null"); return false;
+            }
+            if (!nextMapOffset_ch.TryGetLong(out _))
+            {
+                CcLog.Message("Map offset pointer can't be accessed."); return false;
+            }
+
+            nextMapOffset_ch.SetLong(2);
+
+            return true;
+        }
+
+        private void InjectLevelSkipper()
+        {
+            //Debug_ManuallySetHalo1BaseAddress();
+
+            UndoInjection(LevelSkipperId);
+            CcLog.Message("Injecting level skipper.");
+
+            AddressChain nextLevelReadInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + NextLevelReadInstructionOffset);
+            int bytesToReplaceLength = 0x10;
+
+            // Original bytes. Total length: 0x10
+            //halo1.dll + AFA80E - 41 0F10 03 - movups xmm0,[r11]
+            //halo1.dll + AFA812 - 0F11 07 - movups[rdi],xmm0
+            //halo1.dll + AFA815 - 41 0F10 4B 10 - movups xmm1,[r11+10]
+            //halo1.dll + AFA81A - 0F11 4F 10 - movups[rdi + 10],xmm1
+
+            (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(nextLevelReadInstruction_ch, bytesToReplaceLength);
+            ReplacedBytes.Add((LevelSkipperId, injectionAddress, originalBytes));
+
+            CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
+
+            IntPtr mapListPointersCave = CreateCodeCave(ProcessName, 16);
+            // First 8 bytes: address written by the injected code to locate the map list
+            // Last 8 bytes: address of the next level to load, initially by the CC and updated by the injected code.
+            CreatedCaves.Add((LevelSkipperId, (long)mapListPointersCave, 16));
+            CcLog.Message("Map list pointers: " + ((long)mapListPointersCave).ToString("X"));
+
+            byte[] levelJumperAsm = new byte[]
+            {
+                // Read the list pointer. If it is 0, write it.
+                0x50, //push rax
+                0x53, // push rbx,
+                0x51, // push rcx,
+                0x52, // push rdx,
+                0x57, // push rdi
+                0x48, 0xBB }.AppendNum((long)mapListPointersCave).Append( // mov rbx, <cave pointer>
+                0x48, 0x31, 0xFF, // xor rdi, rdi; set rdi to 0
+                0x48, 0x8B, 0x03, // mov rax,[rbx]
+                0x48, 0x83, 0xf8, 0x00, // cmp rax,00 { 0 }
+                0x75).AppendRelativePointer("skipWritingListPointer", 0x35).Append( // jne skipWritingListPointer
+                0x49, 0x8b, 0xcb, // mov rcx, r11
+                0x48, 0x83, 0xc1, 0x1c, // add rcx, 1c, ; 1C is the offset of PILL
+                0x48, 0xBA, 0x50, 0x00, 0x69, 0x00, 0x6C, 0x00, 0x6C, 0x00) // mov rdx, "PILL"; The last 8 bytes spell PILL in Unicode
+                .LocalJumpLocation("loopToFindListStart").Append(
+                0x48, 0x81, 0xFF, 0x14, 0x00, 0x00, 0x00, // cmp rdi, 0x1E; (20 in decimal)
+                0x7d).AppendRelativePointer("dontChangeLevel", 0x41).Append( // JNL; jump if not less than. Means we iterated further than the start of the list
+                0x48, 0x8B, 0x01, // mov rax, [rcx]
+                0x48, 0x39, 0xd0, // cmp rax, rdx
+                0x74).AppendRelativePointer("writeListPointerToCave", 0xC).Append( // je
+                0x48, 0x81, 0xE9, 0x64, 0x02, 0x00, 0x00, // sub rcx, 0x264,
+                0x48, 0xFF, 0xC7, // inc rdi
+                0xEB).AppendRelativePointer("loopToFindListStart", 0xE3) // jmp
+
+                .LocalJumpLocation("writeListPointerToCave").Append(
+                0x48, 0x83, 0xE9, 0x1C, // sub rcx, 0x1C; 1C is the offset of PILL, decreased to point to the start of the entry
+                0x48, 0x89, 0x0B) // mov [rbx], rcx; save the pointer
+
+                .LocalJumpLocation("skipWritingListPointer").Append(
+                // Read the offset of the next level. The first level is offset 1. If the offset is not set, do nothing.
+                // If it set, change R11 by the corresponding list entry
+                0x48, 0x8B, 0x0B, // mov rcx, [rbx] ; load the pointer to the  first entry list
+                0x48, 0x83, 0xC3, 0x08, // add rbx, 0x08; set the cave pointer to point to the level offset value
+                0x48, 0x8b, 0x03, // mov rax, [rbx]; load the level offset
+                0x48, 0x83, 0xF8, 0x00, // cmp rax, 00
+                0x74).AppendRelativePointer("dontChangeLevel", 0x16).Append( // je
+                // calculate the pointer to the level list entry
+                0x48, 0xFF, 0xC8, // dec rax; (Pillar of autumn is the first entry (0 real offset), but we use offset 1 for it to know it is set)
+                0x48, 0x69, 0xC0, 0x64, 0x02, 0x00, 0x00, // imul rax, rax, 0x264; multiply the offset by the distance between entries
+                0x48, 0x01, 0xC8, // add rax, rcx; combine with first entry's pointer
+                0x4C, 0x8B, 0xD8, // mov r11, rax; r11 contains the pointer to the entry of the next level, so we hijack it
+                //0xff, 0x03) // inc [rbx]; increase the level offset, since we are moving up one level <- the function runs more than once and crashes, so this won't work
+                0xC7, 0x03, 0x0, 0x0, 0x0, 0x0) // mov [rbx], 0; this way it won't keep trying to load levels
+                .LocalJumpLocation("dontChangeLevel").Append(
+                0x5F, // pop rdi
+                0x5A, // pop rdx,
+                0x59, // pop rcx,
+                0x5B, // pop rbx
+                0x58); // pop rax
+
+            byte[] fullCaveContents = levelJumperAsm.Concat(originalBytes)
+                .Concat(GenerateJumpBytes(injectionAddress + bytesToReplaceLength, bytesToReplaceLength)).ToArray();
+
+            long cavePointer = CodeCaveInjection(nextLevelReadInstruction_ch, bytesToReplaceLength, fullCaveContents);
+            CreatedCaves.Add((LevelSkipperId, cavePointer, StandardCaveSizeBytes));
+
+            nextMapOffset_ch = AddressChain.Absolute(Connector, (long)mapListPointersCave).Offset(8);
+            CcLog.Message("Level skipper injection finished");
+        }
+
         /// <summary>
         /// Inserts code that constantly writes to a variable, increasing it weach time. The code is executed every frame of gameplay,
         /// so we can use it to deduce if we are in gameplay (it changes constantly)
@@ -1181,13 +1421,20 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             //halo1.dll + BB3324 - F2 0F10 00 - movsd xmm0,[rax]
             //halo1.dll + BB3328 - F2 0F11 85 B0030000 - movsd[rbp + 000003B0],xmm0
 
-            AddressChain onlyRunOnGameplayInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + IsInGameplayPollInjectionOffset);
-            int bytesToReplaceLength = 0x13;
+            // I'm hooking to more than one function to have redundancy. The amount of change in the var is not important, just that it changes
+            // when in gamplay and does not when not.
+            AddressChain onlyRunOnGameplayInstruction1_ch = AddressChain.Absolute(Connector, halo1BaseAddress + IsInGameplayPollInjectionOffset1);
+            AddressChain onlyRunOnGameplayInstruction2_ch = AddressChain.Absolute(Connector, halo1BaseAddress + IsInGameplayPollInjectionOffset2);
+            int bytesToReplaceLength1 = 0x13;
+            int bytesToReplaceLength2 = 0x10;
 
-            (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(onlyRunOnGameplayInstruction_ch, bytesToReplaceLength);
-            ReplacedBytes.Add((IsInGameplayPollingId, injectionAddress, originalBytes));
+            (long injectionAddress1, byte[] originalBytes1) = GetOriginalBytes(onlyRunOnGameplayInstruction1_ch, bytesToReplaceLength1);
+            (long injectionAddress2, byte[] originalBytes2) = GetOriginalBytes(onlyRunOnGameplayInstruction2_ch, bytesToReplaceLength2);
+            ReplacedBytes.Add((IsInGameplayPollingId, injectionAddress1, originalBytes1));
+            ReplacedBytes.Add((IsInGameplayPollingId, injectionAddress2, originalBytes2));
 
-            CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
+            CcLog.Message("Injection address 1: " + injectionAddress1.ToString("X"));
+            CcLog.Message("Injection address 2: " + injectionAddress2.ToString("X"));
 
             IntPtr isInGameplayPollPointerPointer = CreateCodeCave(ProcessName, 8);
             CreatedCaves.Add((IsInGameplayPollingId, (long)isInGameplayPollPointerPointer, 8));
@@ -1202,12 +1449,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             0x48, 0xA3).AppendNum((long)isInGameplayPollPointerPointer).Append( // mov [var], rax
             0x58);// pop rax
 
-            byte[] fullCaveContents = variableWriter
-                .Concat(originalBytes)
-                .Concat(GenerateJumpBytes(injectionAddress + bytesToReplaceLength, bytesToReplaceLength)).ToArray();
+            byte[] fullCave1Contents = variableWriter
+                .Concat(originalBytes1)
+                .Concat(GenerateJumpBytes(injectionAddress1 + bytesToReplaceLength1, bytesToReplaceLength1)).ToArray();
+            byte[] fullCave2Contents = variableWriter
+                .Concat(originalBytes2)
+                .Concat(GenerateJumpBytes(injectionAddress2 + bytesToReplaceLength2, bytesToReplaceLength2)).ToArray();
 
-            long cavePointer = CodeCaveInjection(onlyRunOnGameplayInstruction_ch, bytesToReplaceLength, fullCaveContents);
-            CreatedCaves.Add((IsInGameplayPollingId, cavePointer, StandardCaveSizeBytes));
+            long cavePointer1 = CodeCaveInjection(onlyRunOnGameplayInstruction1_ch, bytesToReplaceLength1, fullCave1Contents);            
+            CreatedCaves.Add((IsInGameplayPollingId, cavePointer1, StandardCaveSizeBytes));
+            long cavePointer2 = CodeCaveInjection(onlyRunOnGameplayInstruction2_ch, bytesToReplaceLength2, fullCave2Contents);
+            CreatedCaves.Add((IsInGameplayPollingId, cavePointer2, StandardCaveSizeBytes));
 
             CcLog.Message("Injection of polling to know if we are in gameplay finished.----------------------");
         }
@@ -3191,8 +3443,127 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                                 Connector.SendMessage($"You can calm down now.");
                             });
                         break;
-                    }                    
+                    }
+                case "forcemouse":
+                    {
+                        if (code.Length < 2) { HandleInvalidRequest(request); return; }
+                        int dx = 0;
+                        int dy = 0;
+                        string startMessage = "";
+                        string endMessage = "";
+                        switch (code[1])
+                        {
+                            case "down":
+                                dy = 130;
+                                startMessage = "made your feet quite interesting.";
+                                endMessage = "Foot fetish erradicated.";
+                                break;
+                            case "up":
+                                dy = -130;
+                                startMessage = "put your hands up to the sky.";
+                                endMessage = "Your arms are too tired for this.";
+                                break;
+                            case "spin":
+                                dx = 130;
+                                startMessage = "started the S.P.E.E.N. protocol.";
+                                endMessage = "S.P.E.E.N. protocol completed";
+                                break;
+                            case "drift":
+                                Random rng = new Random();
+                                dx = rng.Next(-40, 40);
+                                dy = rng.Next(-40, 40);
+                                startMessage = "made your joycon drift. Yes, on keyboard and mouse.";
+                                endMessage = "fixed your joycon";
+                                break;
+                        }
+
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} {startMessage}");                                
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                BringGameToForeground();
+                                return keyManager.ForceMouseMove(dx, dy);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "mouseoverride").WhenCompleted.Then((task) =>
+                            {
+                                Connector.SendMessage(endMessage);
+                            });
+                        break;
+                    }
+                case "forcemouseshake":
+                    {
+                        Random rng = new Random();
+                        int maxRange = 120;
+                        int dxToRecover = 0;
+                        int dyToRecover = 0;
+                        bool recoverFrame = false;
+                        int frameCounter = 0;
+                        int recoveryFrameInterval = 3;
+                        float controlFactor = 0.8f;
+                        RepeatAction(request,
+                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+                            startAction: () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} gave you 299 cups of coffee.");
+                                return true;
+                            },
+                            startRetry: TimeSpan.FromSeconds(1),
+                            refreshCondition: () => IsInGameplay(),
+                            refreshRetry: TimeSpan.FromMilliseconds(500),
+                            refreshAction: () =>
+                            {
+                                recoverFrame = frameCounter > 0 && frameCounter % recoveryFrameInterval == 0;
+                                BringGameToForeground();
+                                if (recoverFrame)
+                                {
+                                    frameCounter = 0;
+                                    bool success = keyManager.ForceMouseMove((int)(-dxToRecover * controlFactor), (int)(-dyToRecover * controlFactor));
+                                    dxToRecover = 0;
+                                    dyToRecover = 0;
+                                }
+
+                                frameCounter++;
+                                int dx = rng.Next(-maxRange, maxRange);
+                                int dy = rng.Next(-maxRange, maxRange);
+                                dxToRecover += dx;
+                                dyToRecover += dy;
+                                return keyManager.ForceMouseMove(dx, dy);
+                            },
+                            refreshInterval: TimeSpan.FromMilliseconds(33),
+                            extendOnFail: false,
+                            mutex: "mouseoverride").WhenCompleted.Then((task) =>
+                            {
+                                Connector.SendMessage("Your hands are steady again.");
+                            });
+                        break;
+                    }
                 #endregion Controls Override
+                case "movetohalo":
+                    {
+
+                        TryEffect(request, () => IsReady(request),
+                            () =>
+                            {
+                                Connector.SendMessage($"{request.DisplayViewer} sent you to Halo.");
+                                SetNextMap(2);
+                                return SetScriptOneShotEffectVariable(8); // Slipspace jump.
+                            },
+                            true,
+                            null);
+
+                        break;
+
+                    }
                 default:
                     CcLog.Message("Triggered nothing");
                     break;
