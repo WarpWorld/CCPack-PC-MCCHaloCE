@@ -1,5 +1,5 @@
-﻿//ccpragma { "include" : [ "Effects/Implementations/Ammo.cs", "Effects/Implementations/MouseOverride.cs", "Effects/Implementations/KeyOverride.cs", "Effects/Implementations/ReceivedDamage.cs", "Effects/Implementations/H1ScriptEffects.cs", "Effects/Implementations/ApplyForces.cs", "Effects/Implementations/MovementSpeed.cs", "Effects/Implementations/UnstableAirtime.cs", "Effects/Implementations/PlayerPointerBased.cs", "Effects/EffectMutex.cs", "Effects/CursedHaloEffectList.cs", "DllImports.cs", "Utilities/IndirectPointers.cs", "Utilities/InjectionManagement.cs", "LifeCycle/BaseHaloAddressResult.cs", "LifeCycle/IntegrityControl.cs", "Utilities/Debug.cs", "Utilities/ByteArrayBuilding/ByteArrayExtensions.cs", "Utilities/ByteArrayBuilding/InstructionManipulation.cs", "Utilities/InputEmulation/KeyManager.cs", "Utilities/InputEmulation/KeybindData.cs","Utilities/InputEmulation/GameAction.cs", "Utilities/InputEmulation/User32Imports/InputStructs.cs", "Utilities/InputEmulation/User32Imports/MouseEventFlags.cs","Injections/Player.cs", "Injections/DamageModifier.cs", "Injections/ScriptHooks.cs", "Injections/MovementSpeed.cs", "Injections/UnstableAirtime.cs", "Injections/GameplayPolling.cs", "Injections/LevelSkipper.cs", "Injections/Weapon.cs"] }
-//#define DEVELOPMENT
+﻿//ccpragma { "include" : [ "Effects/ContinuousEffect.cs","Effects/OneShotEffect.cs","Effects/Implementations/ComplexEffects.cs","Effects/Implementations/Ammo.cs", "Effects/Implementations/MouseOverride.cs", "Effects/Implementations/KeyOverride.cs", "Effects/Implementations/ReceivedDamage.cs", "Effects/Implementations/H1ScriptEffects.cs", "Effects/Implementations/ApplyForces.cs", "Effects/Implementations/MovementSpeed.cs", "Effects/Implementations/UnstableAirtime.cs", "Effects/Implementations/PlayerPointerBased.cs", "Effects/EffectMutex.cs", "Effects/CursedHaloEffectList.cs", "DllImports.cs", "Utilities/IndirectPointers.cs", "Utilities/InjectionManagement.cs", "LifeCycle/BaseHaloAddressResult.cs", "LifeCycle/IntegrityControl.cs", "Utilities/Debug.cs", "Utilities/ByteArrayBuilding/ByteArrayExtensions.cs", "Utilities/ByteArrayBuilding/InstructionManipulation.cs", "Utilities/InputEmulation/KeyManager.cs", "Utilities/InputEmulation/KeybindData.cs","Utilities/InputEmulation/GameAction.cs", "Utilities/InputEmulation/User32Imports/InputStructs.cs", "Utilities/InputEmulation/User32Imports/MouseEventFlags.cs","Injections/Player.cs", "Injections/DamageModifier.cs", "Injections/ScriptHooks.cs", "Injections/MovementSpeed.cs", "Injections/UnstableAirtime.cs", "Injections/GameplayPolling.cs", "Injections/LevelSkipper.cs", "Injections/Weapon.cs"] }
+#define DEVELOPMENT
 
 using ConnectorLib;
 using ConnectorLib.Inject.AddressChaining;
@@ -17,6 +17,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
     {
         private const string ProcessName = "MCC-Win64-Shipping";
 
+        // Makes the game take focus.
         private void BringGameToForeground()
         {
             _ = SetForegroundWindow(mccProcess.MainWindowHandle);
@@ -48,6 +49,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             hidConnector.Connect(3, TimeSpan.FromSeconds(5));
             this.keyManager.hidConnector = hidConnector;
             InitIntegrityControl();
+            InitializeOneShotEffectQueueing();
         }
 
         private void DeinitGame()
@@ -56,7 +58,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             AbortAllInjection(true);
         }
 
-        // TODO: Actually verify all is set.
+        /// <summary>
+        /// Checks if the game is in a state where effects should be applied.
+        /// </summary>
+        /// <param name="request"></param>
+        /// <returns>True if the game is not paused or in a menu, and the base injected pointers are properly set. </returns>
         protected override bool IsReady(EffectRequest request)
         {
             if (!IsInGameplay())
@@ -88,6 +94,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             return IsProcessReady;
         }
 
+        // Return true if the pointer points to a non-null, non-zero value.
         private bool VerifyIndirectPointerIsReady(AddressChain pointer)
         {
             return pointer != null
@@ -95,13 +102,20 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 && value != 0;
         }
 
+        // Called when a request dooes not have the expected data.
         private void HandleInvalidRequest(EffectRequest request)
         {
             CcLog.Message($"Invalid request: {FinalCode(request)}");
         }
 
+        // Returns true if the game is not closed, on a menu, or paused. Returns true on cutscenes.
         private bool IsInGameplay()
         {
+            if (keyManager.InForcedPause)
+            {
+                CcLog.Message("Actually in gameplay, it is a forced pause.");
+                return true;
+            }
             return currentlyInGameplay;
         }
 
@@ -113,6 +127,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
             switch (code[0])
             {
+                case "thunderstorm": Thunderstorm((int)request.Duration.TotalMilliseconds, 10 * 33, 90 * 33, 5 * 33, 90 * 33); break;
+                case "paranoia": Paranoia((int)request.Duration.TotalMilliseconds, 300); break;
                 case "takeammo":
                     if (code.Length < 2) { HandleInvalidRequest(request); return; }
 
@@ -222,10 +238,10 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
                         switch (code[1])
                         {
-                            case "quad": SetDamageFactors(request, null, 4, null, "granted you QUAD DAMAGE. RIP AND TEAR."); break;
+                            case "quad": SetDamageFactors(request, null, 4, null, "granted you QUAD DAMAGE. RIP AND TEAR.", OneShotEffect.QuadDamage); break;
                             case "ludicrous": SetDamageFactors(request, null, 99999f, true, "granted you the might to crush your enemies in one blow."); break;
                             case "half": SetDamageFactors(request, null, 0.5f, null, "gave your enemies twice the health and shields. The rascal!"); break;
-                            case "reversed": SetDamageFactors(request, null, -1f, null, "made all NPC get healed from any damage."); break;
+                            case "reversed": SetDamageFactors(request, null, -1f, null, "made all NPC get healed from any damage.", OneShotEffect.HealingBullets); break;
                             case "immortal": SetDamageFactors(request, null, 0, false, "made all NPCs immortal."); break;
                         }
                         break;
@@ -246,7 +262,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
                         switch (code[1])
                         {
-                            case "instadeath": SetDamageFactors(request, 99999f, 99999f, true, "made everyone fragile as glass. One hit kills anyone, including you. Keep your shields up!"); break;
+                            case "instadeath": SetDamageFactors(request, 99999f, 99999f, true, "made everyone fragile as glass. One hit kills anyone, including you. Keep your shields up!", OneShotEffect.HeavenOrHell); break;
                             case "invulnerable": SetDamageFactors(request, 0, 0, null, "made everyone immortal. This is awkward."); break;
                             case "glass": SetDamageFactors(request, 3f, 3f, null, "made you do triple damage, but also take it."); break;
                         }
@@ -270,8 +286,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             HandleInvalidRequest(request); return;
                         }
 
-                        // TODO: FIND A WAY TO FIX MALFUNCTION NOT WORKING ON LEVEL CHANGE.
-                        ApplyOneShotEffect(request, slot);
+                        QueueOneShotEffect(request, (OneShotEffect)slot);
                         break;
                     }
                 case "continuouseffect":
@@ -287,6 +302,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 case "crabrave": CrabRave(request); break;
                 case "moonwalk": Moonwalk(request); break;
                 case "forcerepeatedjump": BunnyHop(request); break;
+                case "flappyspartan": FlappySpartan(request); break;
                 case "forcefire": CeaselessDischarge(request); break;
                 case "forcegrenades": ForceGrenades(request); break;
                 case "preventattacking": Pacifist(request); break;
@@ -294,69 +310,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 case "randomizecontrols": RandomizeControls(request); break;
                 case "turretmode": TurretMode(request); break;
                 case "forcecrouch": ForceCrouch(request); break;
-                case "berserker":
-                    {
-                        // TODO: once fully defined, move to wherever it goes.
-                        int deathlessSlot = 25;
-                        int oneShotOneKillSlot = 24;
-
-                        RepeatAction(request,
-                            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
-                            startAction: () =>
-                            {
-                                Connector.SendMessage($"{request.DisplayViewer} told you to RIP AND TEAR.");
-                                // Deathless effect
-                                TrySetIndirectTimedEffectFlag(25, 1);
-                                // Omnipotent effect
-                                TrySetIndirectTimedEffectFlag(24, 1);
-
-                                // Movement speed
-                                SetPlayerMovementSpeed(request, 1.5f, "made you fast.");
-
-                                // Keybinds
-                                keyManager.SetAlernativeBindingToOTherActions(GameAction.Melee, GameAction.Fire);
-                                keyManager.DisableAction(GameAction.Fire);
-                                keyManager.DisableAction(GameAction.ThrowGrenade);
-                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
-                                BringGameToForeground();
-                                keyManager.ForceShortPause();
-                                return true;
-                            },
-                            startRetry: TimeSpan.FromSeconds(1),
-                            refreshCondition: () => IsInGameplay(),
-                            refreshRetry: TimeSpan.FromMilliseconds(1000),
-                            refreshAction: () =>
-                            {
-                                // Deathless effect
-                                TrySetIndirectTimedEffectFlag(25, 1);
-                                // Omnipotent effect
-                                TrySetIndirectTimedEffectFlag(24, 1);
-                                return true;
-                            },
-                            refreshInterval: TimeSpan.FromMilliseconds(33),
-                            extendOnFail: false,
-                            mutex: new string[] { EffectMutex.KeyDisable, EffectMutex.PlayerSpeed, EffectMutex.PlayerReceivedDamage, EffectMutex.Ammo, EffectMutex.NPCReceivedDamage })
-                            .WhenCompleted.Then((task) =>
-                            {
-                                // Repair health and shields.
-                                SetHealth(request, 1, "replenished your health.");
-                                SetShield(request, 1);
-
-                                // Deathless remove
-                                TrySetIndirectTimedEffectFlag(25, 0);
-                                // Omnipotent effect
-                                TrySetIndirectTimedEffectFlag(24, 0);
-
-                                // Keybinds
-                                keyManager.RestoreAllKeyBinds();
-                                keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);
-                                keyManager.ResetAlternativeBindingForAction(GameAction.Melee, halo1BaseAddress);
-                                BringGameToForeground();
-                                keyManager.ForceShortPause();
-                                Connector.SendMessage($"You can calm down now.");
-                            });
-                        break;
-                    }
+                case "berserker": Berserker(request); break;
                 case "forcemouse":
                     {
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
@@ -367,8 +321,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "spin": ApplyMovementEveryFrame(request, 130, 0, "started the S.P.E.E.N. protocol.", "S.P.E.E.N. protocol completed"); break;
                             case "drift":
                                 Random rng = new Random();
-                                int dx = rng.Next(-40, 40);
-                                int dy = rng.Next(-40, 40);
+                                int dx = rng.Next(-15, 15);
+                                int dy = rng.Next(-15, 15);
 
                                 ApplyMovementEveryFrame(request, dx, dy, "made your joycon drift. Yes, on keyboard and mouse.", "fixed your joycon.");
                                 break;
@@ -383,28 +337,50 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             {
                                 Connector.SendMessage($"{request.DisplayViewer} sent you to Halo.");
                                 SetNextMap(2);
-                                return SetScriptOneShotEffectVariable(8); // Slipspace jump.
+                                QueueOneShotEffect((short)OneShotEffect.SkipLevel, 0); // Slipspace jump.
+                                return true;
                             },
                             true,
                             EffectMutex.LevelChangeOrRestart);
 
                         break;
                     }
-#if DEVELOPMENT
-                case "abortallinjection":
-                    {
-                        AbortAllInjection(true);
-                        break;
-                    }
-#endif
+                //#if DEVELOPMENT
+                //                case "testdurationparam":
+                //                    {
+                //                        TryEffect(request, () => IsReady(request),
+                //                        () =>
+                //                        {
+                //                            QueueOneShotEffect(2, (int)request.Duration.TotalMilliseconds);
+                //                            return true;
+                //                        },
+                //                    false,
+                //                    null);
+                //                        break;
+                //                    }
+                //                case "testmultieffect":
+                //                    {
+                //                        QueueOneShotEffect(10, 0);
+                //                        QueueOneShotEffect(11, 0);
+                //                        QueueOneShotEffect(12, 0);
+                //                        QueueOneShotEffect(13, 0);
+                //                        //QueueOneShotEffect(5);
+                //                        QueueOneShotEffect(6, 0);
+                //                        QueueOneShotEffect(7, 0);
+
+                //                        break;
+                //                    }
+                //                case "abortallinjection":
+                //                    {
+                //                        AbortAllInjection(true);
+                //                        break;
+                //                    }
+                //#endif
                 default:
+                    HandleInvalidRequest(request);
                     CcLog.Message("Triggered nothing");
                     break;
             }
         }
     }
-
-    /* Notes:
-     * When using data in the cave, the jump is calculated by the cave data offset - the offset of the next instruction.
-    */
 }
