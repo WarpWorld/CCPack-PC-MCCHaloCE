@@ -188,6 +188,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             case "1": SetHealth(request, 1, "healed you."); break;
                             case "min": SetHealth(request, 0.01f, "left you on your last legs."); break;
+                            case "gain1peg":SetRelativeHealth(request, 1f/8f, "healed you a little bit."); break;
+                            case "lose1peg": SetRelativeHealth(request, -1f/8f, "poked you."); break;
                             default: HandleInvalidRequest(request); return;
                         }
                         break;
@@ -197,6 +199,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     {
                         GiveHealthRegen(request, 0.2f, 1000); break;
                     }
+                case "slowpoison": GiveHealthRegen(request, -0.1f, 1000); break;
                 case "grenades":
                     {
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
@@ -242,7 +245,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             case "ludicrous": SetDamageFactors(request, null, 99999f, true, "granted you the might to crush your enemies in one blow."); break;
                             case "half": SetDamageFactors(request, null, 0.5f, null, "gave your enemies twice the health and shields. The rascal!"); break;
                             case "reversed": SetDamageFactors(request, null, -1f, null, "made all NPC get healed from any damage.", OneShotEffect.HealingBullets); break;
-                            case "immortal": SetDamageFactors(request, null, 0, false, "made all NPCs immortal."); break;
+                            case "immortal": SetDamageFactors(request, null, 0, false, "made all NPCs immortal.", OneShotEffect.EnemyGodModeS); break;
                         }
                         break;
                     }
@@ -253,7 +256,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             case "tenth": SetDamageFactors(request, 0.1f, null, null, "made you almost bullet proof."); break;
                             case "instadeath": SetDamageFactors(request, 9999f, null, null, "made your enemies be able to blow you or your shields up in one hit. Good luck."); break;
-                            case "invulnerable": SetDamageFactors(request, 0f, null, null, "made you IMMORTAL."); break;
+                            case "invulnerable": SetDamageFactors(request, 0f, null, null, "made you IMMORTAL.", OneShotEffect.GodModeS); break;
                         }
                         break;
                     }
@@ -263,8 +266,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         switch (code[1])
                         {
                             case "instadeath": SetDamageFactors(request, 99999f, 99999f, true, "made everyone fragile as glass. One hit kills anyone, including you. Keep your shields up!", OneShotEffect.HeavenOrHell); break;
-                            case "invulnerable": SetDamageFactors(request, 0, 0, null, "made everyone immortal. This is awkward."); break;
-                            case "glass": SetDamageFactors(request, 3f, 3f, null, "made you do triple damage, but also take it."); break;
+                            case "invulnerable": SetDamageFactors(request, 0, 0, null, "made everyone immortal. This is awkward.", OneShotEffect.NerWarS); break;
+                            case "glass": SetDamageFactors(request, 3f, 3f, null, "made you do triple damage, but also take it.", OneShotEffect.GlassCannonS); break;
                         }
                         break;
                     }
