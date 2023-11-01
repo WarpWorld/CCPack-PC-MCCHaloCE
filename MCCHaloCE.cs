@@ -63,7 +63,34 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         /// </summary>
         /// <param name="request"></param>
         /// <returns>True if the game is not paused or in a menu, and the base injected pointers are properly set. </returns>
+        /// <remarks>
+        ///     Sometimes, the effect pack seems to be stuck on thinking the game is paused. For this, we track how many times IsReady has failed, and how long has it been since the last ready check.
+        ///     When IsReady fails, we increase the counter. If it succeeds, we reset it.
+        ///     When we reach a max level of failures in a row, and more than the max time has elapsed since the last successful IsInGameplayCheck, we start ignoring any pause detection.
+        ///     When the periodic IsInGameplayCheck succeeds, we update the date of the last successful IsInGameplayCheck and stop ignoring pause detection if we were.
+        /// </remarks>
         protected override bool IsReady(EffectRequest request)
+        {
+            bool isReady = IsInGameplayAndPointersAreOk(request);
+            if (isReady)
+            {
+                ContiguousIsReadyFailures = 0;
+            }
+            else
+            {
+                ContiguousIsReadyFailures += 1;
+            }
+
+            if (ContiguousIsReadyFailures > MaxRetryFailures && (DateTime.Now - lastSuccessfulIsInGameplayCheck) > maxTimeInQueue)
+            {
+                ContiguousIsReadyFailures = 0;
+                TryRepairEternalPause();
+            }
+
+            return isReady;
+        }
+
+        private bool IsInGameplayAndPointersAreOk(EffectRequest request)
         {
             if (!IsInGameplay())
             {
@@ -111,6 +138,12 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // Returns true if the game is not closed, on a menu, or paused. Returns true on cutscenes.
         private bool IsInGameplay()
         {
+            if (IgnoreIsInGameplayPolling)
+            {
+                CcLog.Message("Ingoring is-in-gameplay check.");
+                return true;
+            }
+
             if (keyManager.InForcedPause)
             {
                 CcLog.Message("Actually in gameplay, it is a forced pause.");
@@ -127,19 +160,48 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
             switch (code[0])
             {
-                case "thunderstorm": Thunderstorm((int)request.Duration.TotalMilliseconds, 10 * 33, 90 * 33, 5 * 33, 90 * 33); break;
-                case "paranoia": Paranoia((int)request.Duration.TotalMilliseconds, 300); break;
-                case "takeammo":
-                    if (code.Length < 2) { HandleInvalidRequest(request); return; }
-
-                    switch (code[1])
+                case "thunderstorm":
                     {
-                        case "half": TakeAwayAmmoFromCurrentWeapon(0.5f); return;
-                        case "all": TakeAwayAmmoFromCurrentWeapon(1f); return;
-                        case "duplicate": TakeAwayAmmoFromCurrentWeapon(-1); return;
+                        TryEffect(request, () => IsReady(request),
+                            () =>
+                            {
+                                Thunderstorm((int)request.Duration.TotalMilliseconds, 10 * 33, 90 * 33, 5 * 33, 90 * 33);
+                                return true;
+                            },
+                            true, null);
+                        break;
                     }
-                    break;
+                case "paranoia":
+                    {
+                        TryEffect(request, () => IsReady(request),
+                        () =>
+                        {
+                            Paranoia((int)request.Duration.TotalMilliseconds, 300);
+                            return true;
+                        },
+                        true, null);
+                        break;
+                    }
+                case "takeammo":
+                    {
+                        if (code.Length < 2) { HandleInvalidRequest(request); return; }
 
+                        float ammoAmount = code[1] switch
+                        {
+                            "half" => 0.5f,
+                            "all" => 1f,
+                            "duplicate" => -1f
+                        };
+
+                        TryEffect(request, () => IsReady(request),
+                            () =>
+                            {
+                                TakeAwayAmmoFromCurrentWeapon(ammoAmount);
+                                return true;
+                            },
+                            true, EffectMutex.Ammo);
+                        break;
+                    }
                 case "fullauto":
                     {
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
@@ -188,8 +250,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         {
                             case "1": SetHealth(request, 1, "healed you."); break;
                             case "min": SetHealth(request, 0.01f, "left you on your last legs."); break;
-                            case "gain1peg":SetRelativeHealth(request, 1f/8f, "healed you a little bit."); break;
-                            case "lose1peg": SetRelativeHealth(request, -1f/8f, "poked you."); break;
+                            case "gain1peg": SetRelativeHealth(request, 1f / 8f, "healed you a little bit."); break;
+                            case "lose1peg": SetRelativeHealth(request, -1f / 8f, "poked you."); break;
                             default: HandleInvalidRequest(request); return;
                         }
                         break;
@@ -276,7 +338,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         if (code.Length < 2) { HandleInvalidRequest(request); return; }
                         switch (code[1])
                         {
-                            case "shove1": ApplyRandomForce(0.5f, 0.5f, 0.15f); break;
+                            case "shove1":
+                                {
+                                    TryEffect(request, () => IsReady(request),
+                                    () =>
+                                    {
+                                        ApplyRandomForce(0.5f, 0.5f, 0.15f);
+                                        return true;
+                                    },
+                                    true, null);
+                                    break;
+                                }
                             case "shake": ShakePlayer(request, 0.4f, 35, "is shaking you.", "The shakes are over"); break;
                             case "drunk": ShakePlayer(request, 0.15f, 800, "gave you one too many drinks.", "Drunkness over, enjoy the hangover."); break;
                         }

@@ -45,8 +45,25 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 return false;
             }
 
+            // If the current value is 0, this is most likely after resetting to try to repair an infinite pause.
+            if (value == 0)
+            {
+                CcLog.Debug("Gameplay polling value is 0");
+                return false;
+            }
+
             previousGamplayPollingValue = value;
             CcLog.Debug("Gameplay polling pointer changed to " + value);
+
+
+            // On successful gameplay polling var change, we no longer need to ignore pause detection because it is working again.
+            if (IgnoreIsInGameplayPolling)
+            {
+                CcLog.Message("Successful IsInGameplayCheck. No longer ignoring pausing.");
+                IgnoreIsInGameplayPolling = false;
+            }
+            
+            lastSuccessfulIsInGameplayCheck = DateTime.Now;
 
             return true;
         }

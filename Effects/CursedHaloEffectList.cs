@@ -10,7 +10,7 @@ namespace CrowdControl.Games.Packs.Effects
     public static class CursedHaloEffectList
     {
         public const string HealthAndShieldsCategory = "Health and shields";
-        public const string SpeedAndMovementCategory = "Movement speed";
+        public const string SpeedAndMovementCategory = "Movement and speed";
         public const string DamageDoneOrReceivedCategory = "Damage done/received";
         public const string WeaponsAndAmmo = "Weapons and ammo";
         public const string SpawnsAndAI = "Spawns and AI";
@@ -32,7 +32,7 @@ namespace CrowdControl.Games.Packs.Effects
 
             // New stuff
             new("Take half of the current weapon ammo", "takeammo_half") {Category = WeaponsAndAmmo,
-                Description = "Yoink half of the ammo/battery of the currently held weapon.", Price=50, ScaleFactor = 1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Yoink half of the ammo/battery of the currently held weapon.", Price=50/*, ScaleFactor = 1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Take all of the current weapon ammo", "takeammo_all") {Category = WeaponsAndAmmo,
                 Description = "Yoink all of the ammo/battery of the currently held weapon.", Price=1200},
             new("Duplicate current ammo", "takeammo_duplicate") {Category = WeaponsAndAmmo,
@@ -68,11 +68,11 @@ namespace CrowdControl.Games.Packs.Effects
             new("Public Enemy", "oneshotscripteffect_" + (int)OneShotEffect.AiFoe){ Category = SpawnsAndAI,
                 Description = "Make all AI hostile.", Price=1450},
             new("Shrink Ray", "oneshotscripteffect_" + (int)OneShotEffect.AiShrink){ Category = SpawnsAndAI,
-                Description = "Shrink all AI", Price=200, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Shrink all AI", Price=200/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Generalized Panic", "oneshotscripteffect_" + (int)OneShotEffect.AiScream){ Category = SpawnsAndAI,
-                Description = "Make all AI scream non-stop. Does not work on those spawned by CC.", Price=25, ScaleFactor = 1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Make all AI scream non-stop. Does not work on those spawned by CC.", Price=25/*, ScaleFactor = 1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Boing!", "oneshotscripteffect_" + (int)OneShotEffect.Boing){ Category = SpeedAndMovementCategory,
-                Description = "Launch the player into the air.", Price=100, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Launch the player into the air.", Price=100/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Swap to random loadout", "oneshotscripteffect_" + (int)OneShotEffect.RandomLoadout){ Category = WeaponsAndAmmo,
                 Description = "Change the players weapons randomly.", Price=1450},
             new("Spawn D20", "oneshotscripteffect_" + (int)OneShotEffect.SpawnD20){ Category = SpawnsAndAI,
@@ -107,9 +107,9 @@ namespace CrowdControl.Games.Packs.Effects
             new("Slow toxins", "slowpoison") {Category = HealthAndShieldsCategory, Duration = TimeSpan.FromSeconds(15),
                 Description = "Lose health over time. Won't kill you, but it stacks.", Price=75},
             new("Health peg up", "health_gain1peg") { Category = HealthAndShieldsCategory,
-                Description = "Remove one peg of health. Won't kill the player.", Price=25},
-            new("Health peg down", "health_lose1peg") { Category = HealthAndShieldsCategory,
                 Description = "Heal one peg of health. It can go over max health.", Price=25},
+            new("Health peg down", "health_lose1peg") { Category = HealthAndShieldsCategory,
+                Description = "Remove one peg of health. Won't kill the player.", Price=25},
 
             // Speed related
             new("Fast run", "playerspeed_brisk") {Category = SpeedAndMovementCategory, Duration = TimeSpan.FromSeconds(20),
@@ -145,25 +145,25 @@ namespace CrowdControl.Games.Packs.Effects
             new("Kill player", "oneshotscripteffect_" + (int)OneShotEffect.KillPlayer) { Category = OdditiesCategory,
                 Description = "Kills the player unceremoniously.", Price=2000},
             new("Reset level", "oneshotscripteffect_" + (int)OneShotEffect.RestartLevel) { Category = OdditiesCategory,
-                Description = "Resets the current mission", Price=2500, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(60)},
+                Description = "Resets the current mission", Price=2500/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(60)*/},
             new("Give all vehicles", "oneshotscripteffect_" + (int)OneShotEffect.GiveAllVehicles) { Category = SpawnsAndAI,
                 Description = "Drops all the available vehicles on top of the player.", Price=2000},
             new("Armor lock", "oneshotscripteffect_" + (int)OneShotEffect.ArmorLock) { Category = ControlsOverride, Duration = 10,
-                Description = "Become invincinble, but unable to act.", Price=300, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Become invincinble, but unable to act.", Price=300/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Sick beats", "oneshotscripteffect_" + (int)OneShotEffect.ForcedDance) { Category = ControlsOverride, Duration = 10,
-                Description = "Force the player to dance.", Price=500, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Force the player to dance.", Price=500/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Reverse pistol time", "oneshotscripteffect_" + (int)OneShotEffect.ForceReversePistol) { Category = WeaponsAndAmmo, Duration = 5,
                 Description = "Forces the player to use the reverse pistol.", Price=500},
             new("Rapture", "oneshotscripteffect_" + (int)OneShotEffect.Rapture) { Category = OdditiesCategory, Duration = 15,
-                Description = "Heavens call, and all the worthy shall ascend.", Price=2000, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(4)},
+                Description = "Heavens call, and all the worthy shall ascend.", Price=2000/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(4)*/},
             new("Grenades: Steal 3x6", "grenades_take") { Category = WeaponsAndAmmo,
                 Description = "Takes 6 grenades away of each type.", Price=500},
             new("Give unsafe checkpoint", "oneshotscripteffect_" + (int)OneShotEffect.GiveUnsafeCheckpoint) { Category = OdditiesCategory,
                 Description = "Gives a checkpoint immediately, regardless of if the player is about to die or falling to their doom.", Price=1700},
             new("Shove", "addspeed_shove1") { Category = SpeedAndMovementCategory,
-                Description = "Shove the player in a random direction and strength.", Price=75, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Shove the player in a random direction and strength.", Price=75/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("The shakes", "addspeed_shake") { Category = SpeedAndMovementCategory, Duration = 7,
-                Description = "Shake the player for a bit.", Price=200, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Shake the player for a bit.", Price=200/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Drunk", "addspeed_drunk") { Category = SpeedAndMovementCategory, Duration = 30,
                 Description = "Make the player stumble for a while.", Price=150},
 
@@ -171,7 +171,7 @@ namespace CrowdControl.Games.Packs.Effects
             new("Active camouflage", "oneshotscripteffect_" + (int)OneShotEffect.ActiveCamo) {Category = WeaponsAndAmmo,
                 Description = "Gives active camouflage.", Price=1700},
             new("Slipspace jump", "oneshotscripteffect_" + (int)OneShotEffect.SkipLevel) {Category = OdditiesCategory,
-                Description = "Skip the current level!", Price=2500, ScaleFactor=3.5f, ScaleDecayTime = TimeSpan.FromMinutes(99999)},
+                Description = "Skip the current level!", Price=2500/*, ScaleFactor=3.5f, ScaleDecayTime = TimeSpan.FromMinutes(99999)*/},
             new("AI break", "continuouseffect_" + (int)ContinuousEffect.AiBreak) {Category = SpawnsAndAI, Duration = 15,
                 Description = "Turns all AI off for a bit.", Price=1000},
             new("Grenades: Give 6x3", "grenades_give") { Category = WeaponsAndAmmo,
@@ -193,39 +193,39 @@ namespace CrowdControl.Games.Packs.Effects
 
             // Oddities
             new("Body snatcher", "continuouseffect_" + (int)ContinuousEffect.BodySnatcher) { Category = OdditiesCategory, Duration = 15,
-                Description= "Possess anyone you touch. When it is over, you're stuck.", Price= 20000},
+                Description= "Possess anyone you touch. When it is over, you're stuck. And the game may \"despawn\" you like any other NPC.", Price= 20000},
             new("This is awkward", "continuouseffect_" + (int)ContinuousEffect.AwkwardMoment) { Category = ControlsOverride, Duration = 10,
                 Description= "Prevents action by anyone for a bit.", Price=650},
             new("Medusa-117", "continuouseffect_" + (int)ContinuousEffect.Medusa) { Category = OdditiesCategory, Duration = 15,
                 Description = "Anyone that starts looking at you with you will die.", Price=2000},
             new("The Jerod Special", "movetohalo") { Category = OdditiesCategory,
-                Description = "Visit the drum boi's home the8bitFine the8bitFine the8bitFine.", Price=2000, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(60)},
+                Description = "Visit the drum boi's home the8bitFine the8bitFine the8bitFine.", Price=2000/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(60)*/},
 
             // Visibility and HUD
             new("Thunderstorm", "thunderstorm") { Category = VisibilityAndHudCategory, Duration = 10,
                 Description = "Pitch black, the only light coming from occasional thunder.", Price=650},
             new("Paranoia", "paranoia") { Category = VisibilityAndHudCategory, Duration = 10,
-                Description = "Give the player additional anxiety.", Price=50, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Give the player additional anxiety.", Price=50/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Movie mode", "continuouseffect_" + (int)ContinuousEffect.MovieBars) { Category = VisibilityAndHudCategory, Duration = 15,
-                Description = "Sets the mood for some popcorn.", Price=25, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Sets the mood for some popcorn.", Price=25/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Blind", "continuouseffect_" + (int)ContinuousEffect.Blind) { Category = VisibilityAndHudCategory, Duration = 15,
                 Description = "Disable the HUD.", Price=50},
             new("Expert aiming mode", "continuouseffect_" + (int)ContinuousEffect.NoCrosshair) { Category = VisibilityAndHudCategory, Duration = 15,
-                Description = "Disable the crosshair.", Price=50, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Disable the crosshair.", Price=50/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Silence", "continuouseffect_" + (int)ContinuousEffect.Silence) { Category = VisibilityAndHudCategory, Duration = 25,
                 Description = "Disable sound.", Price=75},
             new("HUD Malfunction", "oneshotscripteffect_" + (int)OneShotEffect.Malfunction) { Category = VisibilityAndHudCategory,
-                Description = "Disable a random section of the HUD (health, shields, motion sensor or crosshair) permanently. Does nothing if all are disabled already.", Price=75, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Disable a random section of the HUD (health, shields, motion sensor or crosshair) permanently. Does nothing if all are disabled already.", Price=75/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("HUD Technician", "oneshotscripteffect_" + (int)OneShotEffect.RepairHud) { Category = VisibilityAndHudCategory,
                 Description = "Make a random disabled section of the HUD (health, shields, motion sensor or crosshair) visible again. Does nothing if all are visible already.", Price=75},
 
             // Key manipulation (I count mouse buttons as keys).
             new("Crab rave", "crabrave") { Category = ControlsOverride, Duration = 15,
-                Description = "You're a crab, John. Move sideways only.", Price=100, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "You're a crab, John. Move sideways only.", Price=100/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Moonwalk", "moonwalk") { Category = ControlsOverride, Duration = 15,
-                Description = "Force to walk backwards.", Price=100, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Force to walk backwards.", Price=100/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Bunny hop", "forcerepeatedjump") { Category = ControlsOverride, Duration = 15,
-                Description = "Force repeated jumping.", Price=100, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Force repeated jumping.", Price=100/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Flappy Spartan", "flappyspartan") {Category = ControlsOverride, Duration = 15,
                 Description = "That awful mobile game, now in Mjolnir armor.", Price=150},
             new("Grenade out!", "forcegrenades") { Category = ControlsOverride, Duration = 15,
@@ -245,13 +245,13 @@ namespace CrowdControl.Games.Packs.Effects
 
             // Mouse manipulation.
             new("Foot fetish", "forcemouse_down") { Category = ControlsOverride, Duration = 10,
-                Description = "Force the player to look down.", Price=150, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Force the player to look down.", Price=150/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Heavensward gaze", "forcemouse_up") { Category = ControlsOverride, Duration = 10,
-                Description = "Force the player to look up.", Price=150, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Force the player to look up.", Price=150/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("S.P.E.E.N. protocol", "forcemouse_spin") { Category = ControlsOverride, Duration = 10,
-                Description = "Force to spin.", Price=150, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1) },
+                Description = "Force to spin.", Price=150/*, ScaleFactor=1.5f, ScaleDecayTime = TimeSpan.FromMinutes(1) */},
             new("Joycon drift", "forcemouse_drift") { Category = ControlsOverride, Duration = 10,
-                Description = "Slightly move the cursor constantly.", Price=25, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)},
+                Description = "Slightly move the cursor constantly.", Price=25/*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/},
             new("Shaky hands", "forcemouseshake") { Category = ControlsOverride, Duration = 10,
                 Description = "Shake the crosshair.", Price=150},
 
