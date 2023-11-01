@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Timers;
 using CcLog = CrowdControl.Common.Log;
 
@@ -26,6 +27,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
         // Periodically checks if injections are needed.
         private static System.Timers.Timer injectionCheckerTimer;
+
+        // In the rare conditions where pause detection fails, this allows us to skip it to avoid jamming the effect queue.
+        // It will be set back to false on a successful IsInGamePlayCheck.
+        private bool IgnoreIsInGameplayPolling = false;
+
+
+        // These variables allow us to check if some effect is seemingly stuck in the queue.
+        private DateTime lastSuccessfulIsInGameplayCheck = DateTime.MinValue;
+        private int ContiguousIsReadyFailures = 0;
+        private const int MaxRetryFailures = 30;
+        private readonly TimeSpan maxTimeInQueue = TimeSpan.FromSeconds(15);
 
         // Starts the mechanisms that make sure injections are done and redone if overwritten.
         private void InitIntegrityControl()
@@ -299,6 +311,86 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             }
 
             return BaseHaloAddressResult.WasAlreadyCorrect;
+        }
+
+        // Tries to fix causes that may make the effect pack thing the game is stuck.
+        private void TryRepairEternalPause()
+        {
+            injectionCheckerTimer.Enabled = false;
+            try
+            {
+                bool isGameplayPollingPointerNotSet = false;
+                bool isGameplayPollingVarStillZero = false;
+                if (isInGameplayPollingPointer == null || !isInGameplayPollingPointer.TryGetLong(out long value))
+                {
+                    // The variable is not properly set.
+                    isGameplayPollingPointerNotSet = true;
+                }
+                else if (value == 0)
+                {
+                    isGameplayPollingVarStillZero = true;
+                }
+
+                // If any of the pointers is not set, reset script variables, reinject all, and copy the level skip if any.
+
+                try
+                {
+                    ResetInjectionsAndScriptVariables();
+                }
+                catch (Exception ex) { CcLog.Error(ex, "Exception while attempting to reset scripts to avoid a jammed queue."); }
+
+                // Verify if the polling pointer was properly set.
+                if (isInGameplayPollingPointer == null || !isInGameplayPollingPointer.TryGetLong(out value))
+                {
+                    // The polling is failing. Override pausing.
+                    IgnoreIsInGameplayPolling = true;
+                    CcLog.Message("Gameplay polling is failing. Override pausing.");
+                }
+                // Verify if the variable is still stuck.
+                else
+                {
+                    Thread.Sleep(200);
+
+                    if (!isInGameplayPollingPointer.TryGetLong(out long newValue) || newValue == value)
+                    {
+                        CcLog.Message("Gameplay polling var is not being updated. Override pausing.");
+                        IgnoreIsInGameplayPolling = true;
+                    }
+                }
+            }
+            finally
+            {
+                injectionCheckerTimer.Enabled = true;
+            }            
+        }
+
+        private void ResetInjectionsAndScriptVariables()
+        {
+            int continuousVarDefault = 0x40000000;
+            int oneShotVarDefault = 0x3456ABCD;
+
+            // Reset continous effect script communication variable.
+            if (VerifyIndirectPointerIsReady(scriptVarTimedEffectsPointerPointer_ch))
+            {
+                CcLog.Message("Resetting cont script var.");
+                if (!scriptVarTimedEffectsPointerPointer_ch.TrySetInt(continuousVarDefault))
+                {
+                    CcLog.Error("Could not reset continuous effect script variable.");
+                }
+            }
+
+            if (VerifyIndirectPointerIsReady(scriptVarInstantEffectsPointerPointer_ch))
+            {
+                CcLog.Message("Resetting cont script var.");
+                if (!scriptVarInstantEffectsPointerPointer_ch.TrySetInt(oneShotVarDefault))
+                {
+                    CcLog.Error("Could not reset one-shot effect script variable.");
+                }
+            }
+
+            // Note: I consider that having the queue get jammed between ordering a jerod special,
+            // it setting the next level, and it launching the script to be so low it is not worth to implement a copying of that.            
+            InjectAllHooks();
         }
     }
 }

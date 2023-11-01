@@ -32,6 +32,12 @@ Also, every injection is based on the base address of halo1.dll, which is loaded
 
 If you want to update broken injections or add new effects, feel free to create a pull request.
 
+## Credits
+The song used in the Berserker effect is provided by Vertex https://www.youtube.com/watch?v=IX8bAxvUFnc
+The song used in the Sick Beats effect is provided by https://www.youtube.com/watch?v=3z4z7oECbG4
+The Cursed Halo mod, including a big portion of the crowd control H1 scripts, were created by InfernoPlus
+CrowdControl framework is provided by CrowdControl
+
 ## License
 
 [MIT](https://choosealicense.com/licenses/mit/)
