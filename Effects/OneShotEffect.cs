@@ -61,6 +61,8 @@
         FlappySpartan_Start = 54,
         FlappySpartan_End = 55,
         SummonCaptain = 56,
+        SpawnRat = 57,
+
         //----------Sounds
         OneHp = 1000,
 

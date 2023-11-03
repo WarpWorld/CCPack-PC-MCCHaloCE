@@ -70,7 +70,6 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 });
         }
 
-
         // Increases (or decreases if delta is negative) health by the given value, without killing him.
         public void SetRelativeHealth(EffectRequest request, float deltaHealth, string message)
         {
@@ -85,7 +84,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                             float currentHealth = BitConverter.ToSingle(data);
 
                             currentHealth += deltaHealth;
-                            if (currentHealth < (1f/8f))
+                            if (currentHealth < (1f / 8f))
                             {
                                 currentHealth = (1f / 8f);
                             }
@@ -97,14 +96,13 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                         EffectMutex.SetHealth);
         }
 
-
         // Sets health to the given value. 1.0 is full health. 0 health does not kill the player until he receives damage.
         public void SetHealth(EffectRequest request, float value, string message)
         {
             TryEffect(request, () => IsReady(request),
                         () =>
                         {
-                            return SetHealth(value, true);                            
+                            return SetHealth(value, true);
                         },
                         () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
                         true,
@@ -120,6 +118,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
 
             return TrySetIndirectFloat(value, basePlayerPointer_ch, HealthOffset, false);
         }
+
         // Increases health every interval.
         public void GiveHealthRegen(EffectRequest request, float valuePerTick, int tickIntervalInMs)
         {

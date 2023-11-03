@@ -255,7 +255,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 }
                 ,
                 //15 => () => ApplyForce(0, 0, 0.1f),
-                _ => () => { }                
+                _ => () => { }
             };
             Action additionalEndAction = effect switch
             {

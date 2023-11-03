@@ -376,7 +376,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
                 startAction: () =>
                 {
-                    InjectFullerAuto(!unlimitedAmmo);
+                    InjectFullerAuto();
                     if (unlimitedAmmo)
                     {
                         TrySetIndirectTimedEffectFlag(ContinuousEffect.TrulyInfiniteAmmo, true);
@@ -391,6 +391,11 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     if (!keyManager.SwapActionWithArbitraryKeyCode(GameAction.SwapWeapons, HIDConnector.VirtualKeyCode.NUMPAD1))
                     {
                         Connector.SendMessage("Could not swap 'swap weapons' to an unused key.");
+                    }
+
+                    if (!keyManager.SwapActionWithArbitraryKeyCode(GameAction.Reload, HIDConnector.VirtualKeyCode.NUMPAD2))
+                    {
+                        Connector.SendMessage("Could not swap 'reload' to an unused key.");
                     }
 
                     keyManager.UpdateGameMemoryKeyState(halo1BaseAddress);

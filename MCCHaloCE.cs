@@ -138,11 +138,12 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // Returns true if the game is not closed, on a menu, or paused. Returns true on cutscenes.
         private bool IsInGameplay()
         {
-            if (IgnoreIsInGameplayPolling)
-            {
-                CcLog.Message("Ingoring is-in-gameplay check.");
-                return true;
-            }
+            // Disabling the "ignoring pause check" unless we confirm the new injections are not enough.
+            //if (IgnoreIsInGameplayPolling)
+            //{
+            //    CcLog.Message("Ingoring is-in-gameplay check.");
+            //    return true;
+            //}
 
             if (keyManager.InForcedPause)
             {

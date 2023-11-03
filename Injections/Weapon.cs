@@ -55,7 +55,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         }
 
         // Injects several effects used to generate the "non-stop shooting" effect.
-        public void InjectFullerAuto(bool allowReloads)
+        public void InjectFullerAuto()
         {
             UndoInjection(FullerAutoId);
             if (!WeaponClipAmmoPointer_ch.Calculate(out long pointerAddress))
@@ -63,15 +63,8 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 throw new Exception("Could not read weapon clip ammo pointer");
             }
             InjectInstantShots(pointerAddress);
-            if (allowReloads)
-            {
-                InjectNeverPump();
-                InjectInstantCharge();
-            }
-            else
-            {
-                InjectNeverReloading();
-            }
+            InjectNeverReloading();
+            InjectInstantCharge();
         }
 
         // Makes the delay between shots 0.
@@ -147,7 +140,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             CcLog.Message("Instant charge injected----");
         }
 
-        // Prevents the flag that sets if we are reloading to 0, so shotguns can rapid fire.
+        // Prevents the flag that sets if we are reloading to 0, so shotguns can rapid fire. Bent shotgun still needs to reload, but won't need to pump.
         public void InjectNeverReloading()
         {
             // Replaced (actually, not just moved to a cave) bytes:
@@ -160,6 +153,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             setReloadingFlagInstruction_ch.SetBytes(new byte[] { 0x90, 0x90, 0x90 });
         }
 
+        // WARNING: Causes crash if injected while on a ghost and then firing.
         // Prevents the flag that sets if we are reloading to be set to 2 o 3, which are values used to indicate pump action.
         // It stills allow it to be set to 1 (which means reloading) or 0 (which means not reloading nor pumping).
         public void InjectNeverPump()
