@@ -32,9 +32,9 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
         // It will be set back to false on a successful IsInGamePlayCheck.
         private bool IgnoreIsInGameplayPolling = false;
 
-
         // These variables allow us to check if some effect is seemingly stuck in the queue.
         private DateTime lastSuccessfulIsInGameplayCheck = DateTime.MinValue;
+
         private int ContiguousIsReadyFailures = 0;
         private const int MaxRetryFailures = 30;
         private readonly TimeSpan maxTimeInQueue = TimeSpan.FromSeconds(15);
@@ -361,7 +361,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             finally
             {
                 injectionCheckerTimer.Enabled = true;
-            }            
+            }
         }
 
         private void ResetInjectionsAndScriptVariables()
@@ -389,7 +389,7 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             }
 
             // Note: I consider that having the queue get jammed between ordering a jerod special,
-            // it setting the next level, and it launching the script to be so low it is not worth to implement a copying of that.            
+            // it setting the next level, and it launching the script to be so low it is not worth to implement a copying of that.
             InjectAllHooks();
         }
     }
