@@ -1,26 +1,26 @@
 ﻿using CrowdControl.Common;
 using CrowdControl.Games.Packs.Effects;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE
+namespace CrowdControl.Games.Packs.MCCHaloCE;
+
+public partial class MCCHaloCE
 {
-    public partial class MCCHaloCE
+    private float PlayerSpeedFactor = 1;
+    private float OthersSpeedFactor = 1;
+
+    private bool ShouldInjectSpeed
+    { get { return PlayerSpeedFactor != 1 || OthersSpeedFactor != 1; } }
+
+    public void SetPlayerMovementSpeedWithoutEffect(float speedFactor)
     {
-        private float PlayerSpeedFactor = 1;
-        private float OthersSpeedFactor = 1;
+        PlayerSpeedFactor = speedFactor;
+        InjectSpeedMultiplier();
+    }
 
-        private bool ShouldInjectSpeed
-        { get { return PlayerSpeedFactor != 1 || OthersSpeedFactor != 1; } }
-
-        public void SetPlayerMovementSpeedWithoutEffect(float speedFactor)
-        {
-            PlayerSpeedFactor = speedFactor;
-            InjectSpeedMultiplier();
-        }
-
-        // Sets a factor that multiplies all player movement speed. New speed is previous speed * (1 + speedFactor)
-        public void SetPlayerMovementSpeed(EffectRequest request, float speedFactor, string message)
-        {
-            StartTimed(request, () => IsReady(request),
+    // Sets a factor that multiplies all player movement speed. New speed is previous speed * (1 + speedFactor)
+    public void SetPlayerMovementSpeed(EffectRequest request, float speedFactor, string message)
+    {
+        StartTimed(request, () => IsReady(request),
                 () =>
                 {
                     Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -42,12 +42,12 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                     UndoInjection(SpeedFactorId);
                 }
             });
-        }
+    }
 
-        // Sets a factor that multiplies all NPC movement speed. New speed is previous speed * (1 + speedFactor)
-        public void SetNPCMovementSpeed(EffectRequest request, float speedFactor, string message)
-        {
-            StartTimed(request, () => IsReady(request),
+    // Sets a factor that multiplies all NPC movement speed. New speed is previous speed * (1 + speedFactor)
+    public void SetNPCMovementSpeed(EffectRequest request, float speedFactor, string message)
+    {
+        StartTimed(request, () => IsReady(request),
                 () =>
                 {
                     Connector.SendMessage($"{request.DisplayViewer} {message}");
@@ -68,6 +68,5 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 }
                 Connector.SendMessage($"NPC speed back to normal.");
             });
-        }
     }
 }
