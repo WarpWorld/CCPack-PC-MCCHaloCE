@@ -2,127 +2,127 @@
 using CrowdControl.Games.Packs.Effects;
 using System;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE
+namespace CrowdControl.Games.Packs.MCCHaloCE;
+
+public enum ShieldRegenEffectType
 {
-    public enum ShieldRegenEffectType
+    No,
+    Instant
+}
+
+public partial class MCCHaloCE
+{
+    private const int HealthOffset = 0x9C;
+    private const int ShieldsOffset = 0xA0;
+    private const int ShieldRegenOffset = 0xC0;
+
+    // Adds the given amount to the player shield. 1.0 is a full normal shield charge. Negative values remove shields.
+    public void AddShield(EffectRequest request, float amount, string messageVerb)
     {
-        No,
-        Instant
+        TryEffect(request, () => IsReady(request),
+            () => TrySetIndirectFloat(amount, basePlayerPointer_ch, ShieldsOffset, true),
+            () => Connector.SendMessage($"{request.DisplayViewer} {messageVerb} your shield"),
+            true,
+            EffectMutex.SetShield);
     }
 
-    public partial class MCCHaloCE
+    public void SetShield(EffectRequest request, float value)
     {
-        private const int HealthOffset = 0x9C;
-        private const int ShieldsOffset = 0xA0;
-        private const int ShieldRegenOffset = 0xC0;
+        TryEffect(request, () => IsReady(request),
+            () => SetShield(value),
+            () => Connector.SendMessage($"{request.DisplayViewer} set your shield to {value}."),
+            true,
+            EffectMutex.SetShield);
+    }
 
-        // Adds the given amount to the player shield. 1.0 is a full normal shield charge. Negative values remove shields.
-        public void AddShield(EffectRequest request, float amount, string messageVerb)
-        {
-            TryEffect(request, () => IsReady(request),
-                        () => TrySetIndirectFloat(amount, basePlayerPointer_ch, ShieldsOffset, true),
-                        () => Connector.SendMessage($"{request.DisplayViewer} {messageVerb} your shield"),
-                        true,
-                        EffectMutex.SetShield);
-        }
+    public bool SetShield(float value)
+    {
+        return TrySetIndirectFloat(value, basePlayerPointer_ch, ShieldsOffset, false);
+    }
 
-        public void SetShield(EffectRequest request, float value)
+    // Sets the shield to a given value. 1.0 is a full normal shield charge.
+    private void SetShieldRegen(EffectRequest request, ShieldRegenEffectType type)
+    {
+        short regenValue = type switch
         {
-            TryEffect(request, () => IsReady(request),
-                        () => SetShield(value),
-                        () => Connector.SendMessage($"{request.DisplayViewer} set your shield to {value}."),
-                        true,
-                        EffectMutex.SetShield);
-        }
+            ShieldRegenEffectType.No => Int16.MaxValue,
+            ShieldRegenEffectType.Instant => 0
+        };
 
-        public bool SetShield(float value)
+        string message = type switch
         {
-            return TrySetIndirectFloat(value, basePlayerPointer_ch, ShieldsOffset, false);
-        }
+            ShieldRegenEffectType.No => "prevented your shield from recharging.",
+            ShieldRegenEffectType.Instant => "gave you a fast regenerating shield."
+        };
 
-        // Sets the shield to a given value. 1.0 is a full normal shield charge.
-        private void SetShieldRegen(EffectRequest request, ShieldRegenEffectType type)
+        RepeatAction(request, () => IsReady(request),
+            () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
+            TimeSpan.FromSeconds(1),
+            () => IsReady(request),
+            TimeSpan.FromMilliseconds(500),
+            () => TrySetIndirectShort(regenValue, basePlayerPointer_ch, ShieldRegenOffset, false),
+            TimeSpan.FromMilliseconds(500),
+            false,
+            EffectMutex.SetShield).WhenCompleted.Then(_ =>
         {
-            short regenValue = type switch
+            TrySetIndirectShort(0, basePlayerPointer_ch, ShieldRegenOffset, false);
+            Connector.SendMessage("Shields are back to normal.");
+        });
+    }
+
+    // Increases (or decreases if delta is negative) health by the given value, without killing him.
+    public void SetRelativeHealth(EffectRequest request, float deltaHealth, string message)
+    {
+        TryEffect(request, () => IsReady(request),
+            () =>
             {
-                ShieldRegenEffectType.No => Int16.MaxValue,
-                ShieldRegenEffectType.Instant => 0
-            };
-
-            string message = type switch
-            {
-                ShieldRegenEffectType.No => "prevented your shield from recharging.",
-                ShieldRegenEffectType.Instant => "gave you a fast regenerating shield."
-            };
-
-            RepeatAction(request, () => IsReady(request),
-                () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
-                TimeSpan.FromSeconds(1),
-                () => IsReady(request),
-                TimeSpan.FromMilliseconds(500),
-                () => TrySetIndirectShort(regenValue, basePlayerPointer_ch, ShieldRegenOffset, false),
-                TimeSpan.FromMilliseconds(500),
-                false,
-                EffectMutex.SetShield).WhenCompleted.Then(_ =>
+                if (!TryGetIndirectByteArray(basePlayerPointer_ch, HealthOffset, 4, out byte[] data))
                 {
-                    TrySetIndirectShort(0, basePlayerPointer_ch, ShieldRegenOffset, false);
-                    Connector.SendMessage("Shields are back to normal.");
-                });
-        }
+                    return false;
+                }
 
-        // Increases (or decreases if delta is negative) health by the given value, without killing him.
-        public void SetRelativeHealth(EffectRequest request, float deltaHealth, string message)
-        {
-            TryEffect(request, () => IsReady(request),
-                        () =>
-                        {
-                            if (!TryGetIndirectByteArray(basePlayerPointer_ch, HealthOffset, 4, out byte[] data))
-                            {
-                                return false;
-                            }
+                float currentHealth = BitConverter.ToSingle(data);
 
-                            float currentHealth = BitConverter.ToSingle(data);
+                currentHealth += deltaHealth;
+                if (currentHealth < (1f / 8f))
+                {
+                    currentHealth = (1f / 8f);
+                }
 
-                            currentHealth += deltaHealth;
-                            if (currentHealth < (1f / 8f))
-                            {
-                                currentHealth = (1f / 8f);
-                            }
+                return SetHealth(currentHealth, true);
+            },
+            () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
+            true,
+            EffectMutex.SetHealth);
+    }
 
-                            return SetHealth(currentHealth, true);
-                        },
-                        () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
-                        true,
-                        EffectMutex.SetHealth);
-        }
-
-        // Sets health to the given value. 1.0 is full health. 0 health does not kill the player until he receives damage.
-        public void SetHealth(EffectRequest request, float value, string message)
-        {
-            TryEffect(request, () => IsReady(request),
-                        () =>
-                        {
-                            return SetHealth(value, true);
-                        },
-                        () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
-                        true,
-                        EffectMutex.SetHealth);
-        }
-
-        public bool SetHealth(float value, bool soundEffectOnFullHealth)
-        {
-            if (value == 1 && soundEffectOnFullHealth)
+    // Sets health to the given value. 1.0 is full health. 0 health does not kill the player until he receives damage.
+    public void SetHealth(EffectRequest request, float value, string message)
+    {
+        TryEffect(request, () => IsReady(request),
+            () =>
             {
-                QueueOneShotEffect((short)OneShotEffect.Heal, 0);
-            }
+                return SetHealth(value, true);
+            },
+            () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
+            true,
+            EffectMutex.SetHealth);
+    }
 
-            return TrySetIndirectFloat(value, basePlayerPointer_ch, HealthOffset, false);
+    public bool SetHealth(float value, bool soundEffectOnFullHealth)
+    {
+        if (value == 1 && soundEffectOnFullHealth)
+        {
+            QueueOneShotEffect((short)OneShotEffect.Heal, 0);
         }
 
-        // Increases health every interval.
-        public void GiveHealthRegen(EffectRequest request, float valuePerTick, int tickIntervalInMs)
-        {
-            RepeatAction(request,
+        return TrySetIndirectFloat(value, basePlayerPointer_ch, HealthOffset, false);
+    }
+
+    // Increases health every interval.
+    public void GiveHealthRegen(EffectRequest request, float valuePerTick, int tickIntervalInMs)
+    {
+        RepeatAction(request,
                 () => IsReady(request),
                 () =>
                 {
@@ -166,17 +166,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 TimeSpan.FromMilliseconds(tickIntervalInMs),
                 false,
                 Guid.NewGuid().ToString())// Using a random mutext because null caused function signature ambiguity.
-                .WhenCompleted.Then(_ =>
-                {
-                    Connector.SendMessage("Health regeneration ended.");
-                });
-        }
+            .WhenCompleted.Then(_ =>
+            {
+                Connector.SendMessage("Health regeneration ended.");
+            });
+    }
 
-        // Sets health to minimum, and restores it to its previous value after the duration.
-        public void OneHealthAndADream(EffectRequest request)
-        {
-            float previousHealth = 1;
-            StartTimed(request,
+    // Sets health to minimum, and restores it to its previous value after the duration.
+    public void OneHealthAndADream(EffectRequest request)
+    {
+        float previousHealth = 1;
+        StartTimed(request,
             startCondition: () => IsReady(request),
             continueCondition: () => IsReady(request),
             continueConditionInterval: TimeSpan.FromMilliseconds(500),
@@ -189,17 +189,17 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 return TrySetIndirectFloat(0.01f, basePlayerPointer_ch, HealthOffset, false);
             },
             EffectMutex.SetHealth).WhenCompleted.Then(_ =>
-            {
-                Connector.SendMessage($"Critical state healed.");
-                TrySetIndirectFloat(previousHealth, basePlayerPointer_ch, HealthOffset, false);
-            });
-        }
-
-        // Gives grenades to the player. Use negative amount to take grenades away.
-        // Warthogs are optional since they are free vehicles and hence specially useful.
-        public void GiveGrenades(EffectRequest request, int amount, bool includeWarthogs, string message)
         {
-            TryEffect(request, () => IsReady(request),
+            Connector.SendMessage($"Critical state healed.");
+            TrySetIndirectFloat(previousHealth, basePlayerPointer_ch, HealthOffset, false);
+        });
+    }
+
+    // Gives grenades to the player. Use negative amount to take grenades away.
+    // Warthogs are optional since they are free vehicles and hence specially useful.
+    public void GiveGrenades(EffectRequest request, int amount, bool includeWarthogs, string message)
+    {
+        TryEffect(request, () => IsReady(request),
             () =>
             {
                 if (!TryGetIndirectByteArray(basePlayerPointer_ch, FirstGrenadeTypeAmountOffset, 4, out byte[] grenadeValues))
@@ -238,6 +238,5 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
             },
             () => Connector.SendMessage($"{request.DisplayViewer} {message} some grenades."),
             true, EffectMutex.SetGrenades);
-        }
     }
 }
