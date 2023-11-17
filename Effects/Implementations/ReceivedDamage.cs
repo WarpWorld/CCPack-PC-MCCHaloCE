@@ -1,28 +1,28 @@
 ﻿using CrowdControl.Common;
-using CrowdControl.Games.Packs.Effects;
+using CrowdControl.Games.Packs.MCCHaloCE.Effects;
 using System.Collections.Generic;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
-
-public partial class MCCHaloCE
+namespace CrowdControl.Games.Packs.MCCHaloCE
 {
-    private float PlayerReceivedDamageFactor = 1;
-    private float OthersReceivedDamageFactor = 1;
-    private bool InstakillEnemies = false;
-
-    /// <summary>
-    /// Sets the factors that multiplies the damage received by units.
-    /// </summary>
-    /// <param name="playerFactor">Factor for damage RECEIVED by the player.</param>
-    /// <param name="npcFactor">Factor for damage RECEIVED by NPCs, including vehicles.</param>
-    /// <param name="instakillEnemies">If true, any NPC received damage is replaced by an extremly high value.
-    /// Made almost obsolete by the "omnipotent" cheat, since that allows to kill even dropships.</param>
-    public void SetDamageFactors(EffectRequest request, float? playerFactor, float? npcFactor, bool? instakillEnemies, string startMessage, OneShotEffect? sound = null)
+    public partial class MCCHaloCE
     {
-        List<string> mutex = new();
-        if (playerFactor != null) { mutex.Add(EffectMutex.PlayerReceivedDamage); }
-        if (npcFactor != null || instakillEnemies != null) { mutex.Add(EffectMutex.NPCReceivedDamage); }
-        StartTimed(request,
+        private float PlayerReceivedDamageFactor = 1;
+        private float OthersReceivedDamageFactor = 1;
+        private bool InstakillEnemies = false;
+
+        /// <summary>
+        /// Sets the factors that multiplies the damage received by units.
+        /// </summary>
+        /// <param name="playerFactor">Factor for damage RECEIVED by the player.</param>
+        /// <param name="npcFactor">Factor for damage RECEIVED by NPCs, including vehicles.</param>
+        /// <param name="instakillEnemies">If true, any NPC received damage is replaced by an extremly high value.
+        /// Made almost obsolete by the "omnipotent" cheat, since that allows to kill even dropships.</param>
+        public void SetDamageFactors(EffectRequest request, float? playerFactor, float? npcFactor, bool? instakillEnemies, string startMessage, OneShotEffect? sound = null)
+        {
+            List<string> mutex = new();
+            if (playerFactor != null) { mutex.Add(EffectMutex.PlayerReceivedDamage); }
+            if (npcFactor != null || instakillEnemies != null) { mutex.Add(EffectMutex.NPCReceivedDamage); }
+            StartTimed(request,
                 () => { return IsReady(request) && PlayerReceivedDamageFactor == 1 && OthersReceivedDamageFactor == 1 && !InstakillEnemies; },
                 () =>
                 {
@@ -101,5 +101,6 @@ public partial class MCCHaloCE
 
                 UndoInjection(OnDamageConditionalId);
             });
+        }
     }
 }
