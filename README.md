@@ -6,7 +6,8 @@ This is an effect pack for doing Crowd Control on Halo CE on the Master Chief Co
 Requires: 
 - Master Chief Collection on Steam. If you have it elsewhere, like Game Pass, look into how to install Steam Worshop mods on that version and it should work as well.
 - And if trying to run it locally, the CrowdControl SDK. https://developer.crowdcontrol.live/sdk/
-   - If not running locally, search Halo in the CrowdControl application.
+   - Copy the contents of this repository on \<folder of the CrowdControl SDK\>/PackProject/HaloCE
+- Then run the Crowd Control SDK, click Load Package Source, select MCCHaloCE.cs, and then click Connect.
 
 ## How it works
 
@@ -26,13 +27,22 @@ Also, every injection is based on the base address of halo1.dll, which is loaded
 - Utilities contains methods used by all the other code.
 - HaloFiles contains the H1 script code relevant to the effect pack. Note that to modify this it needs to be added on each level of the Cursed Halo source code and rebuild such levels.
 
+## How to compile halo maps
+
+1. Download the Halo: CE Mod Tools - MCC on steam, and open its folder (On the steam library, Right click->Manage->Browse local files). You should be on a folder named HCEEK.
+3. Run HCEEK (Extract).bat
+4. Copy the contents of HaloFiles/ccHaloModifiedSource in HCEEK, so that the data and tags subfolders merge.
+5. Copy tool_classicBuildEverything(in HaloFiles) to the HCEEK folder and run it.
+6. All the modified maps should be in the maps folder in HCEEK. You can now use them to replace the Halo 1 campaign maps.
+
 ## Contributing
 
 If you want to update broken injections or add new effects, feel free to create a pull request.
 
 ## Credits
 Pack created by ZePistachio
-CrowdControl framework is provided by CrowdControl
+The song used in the Berserker effect is provided by Vertex https://www.youtube.com/watch?v=IX8bAxvUFnc
+CrowdControl framework is provided by CrowdControl ( https://crowdcontrol.live/ )
 
 ## License
 
