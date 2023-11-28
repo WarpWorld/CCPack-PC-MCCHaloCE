@@ -1,11 +1,9 @@
 ﻿using ConnectorLib.Exceptions;
 using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
