@@ -4,69 +4,69 @@ using System;
 using System.Linq;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE
+namespace CrowdControl.Games.Packs.MCCHaloCE;
+
+public partial class MCCHaloCE
 {
-    public partial class MCCHaloCE
+    private const long ScriptInjectionOffset = 0xACC0E9;
+
+    // Points to where the injected code store the variables we use to communicate with the H1 scripts.
+    private AddressChain? scriptVarInstantEffectsPointerPointer_ch = null;
+
+    // Note: This points to the first var. Any others will be referred using a multiple of 8 offset on the value pointed by this one.
+    private AddressChain? scriptVarTimedEffectsPointerPointer_ch = null;
+
+    // Continuous script variables use bits in a script variable to be activated. Hence there's a max after which we need to use another variable.
+    private const int MaxContinousScriptEffectSlotPerVar = 30;
+
+    private const string ScriptVarPointerId = "scriptVarPointerId";
+    private const string ScriptVar2PointerId = "scriptVar2PointerId";
+
+    /// <summary>
+    /// Inserts code that writes pointers to the scripts variables, <see cref="scriptVarInstantEffectsPointerPointer_ch"/>
+    /// and <see cref="scriptVarTimedEffectsPointerPointer_ch"/>, which allows the effect pack to communicate with the H1 scripts.
+    /// </summary>
+    private void InjectScriptHook()
     {
-        private const long ScriptInjectionOffset = 0xACC0E9;
-
-        // Points to where the injected code store the variables we use to communicate with the H1 scripts.
-        private AddressChain? scriptVarInstantEffectsPointerPointer_ch = null;
-
-        // Note: This points to the first var. Any others will be referred using a multiple of 8 offset on the value pointed by this one.
-        private AddressChain? scriptVarTimedEffectsPointerPointer_ch = null;
-
-        // Continuous script variables use bits in a script variable to be activated. Hence there's a max after which we need to use another variable.
-        private const int MaxContinousScriptEffectSlotPerVar = 30;
-
-        private const string ScriptVarPointerId = "scriptVarPointerId";
-        private const string ScriptVar2PointerId = "scriptVar2PointerId";
-
-        /// <summary>
-        /// Inserts code that writes pointers to the scripts variables, <see cref="scriptVarInstantEffectsPointerPointer_ch"/>
-        /// and <see cref="scriptVarTimedEffectsPointerPointer_ch"/>, which allows the effect pack to communicate with the H1 scripts.
-        /// </summary>
-        private void InjectScriptHook()
+        try
         {
-            try
-            {
-                UndoInjection(ScriptVarPointerId);
-            }
-            catch (Exception e)
-            {
-                CcLog.Error(e, "Undoing is causing a crash - scripthook.");
-            }
+            UndoInjection(ScriptVarPointerId);
+        }
+        catch (Exception e)
+        {
+            CcLog.Error(e, "Undoing is causing a crash - scripthook.");
+        }
 
-            CcLog.Message("Injecting script communication hook.---------------------------");
-            // Original replaced bytes. Total length: 16 (0x10)
-            //0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
-            //0x48, 0x03, 0xC2, //add rax,rdx
-            //0x8B, 0x44, 0xC8, 0x04, // mov eax,[rax+rcx*8+04]
-            //0x48, 0x83, 0xC4, 0x20, //add rsp, 20
-            //0x5B, // pop rbx
-            var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionOffset);
-            int bytesToReplaceLength = 0x10;
+        CcLog.Message("Injecting script communication hook.---------------------------");
+        // Original replaced bytes. Total length: 16 (0x10)
+        //0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
+        //0x48, 0x03, 0xC2, //add rax,rdx
+        //0x8B, 0x44, 0xC8, 0x04, // mov eax,[rax+rcx*8+04]
+        //0x48, 0x83, 0xC4, 0x20, //add rsp, 20
+        //0x5B, // pop rbx
+        var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionOffset);
+        int bytesToReplaceLength = 0x10;
 
-            (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(scriptVarReadingInstruction_ch, bytesToReplaceLength);
-            ReplacedBytes.Add((ScriptVarPointerId, injectionAddress, originalBytes));
+        (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(scriptVarReadingInstruction_ch, bytesToReplaceLength);
+        ReplacedBytes.Add((ScriptVarPointerId, injectionAddress, originalBytes));
 
-            IntPtr scriptVarPointerPointer = CreateCodeCave(ProcessName, 8);
-            IntPtr scriptVar2PointerPointer = CreateCodeCave(ProcessName, 8);
-            CreatedCaves.Add((ScriptVarPointerId, (long)scriptVarPointerPointer, 8));
-            CreatedCaves.Add((ScriptVarPointerId, (long)scriptVar2PointerPointer, 8));
+        IntPtr scriptVarPointerPointer = CreateCodeCave(ProcessName, 8);
+        IntPtr scriptVar2PointerPointer = CreateCodeCave(ProcessName, 8);
+        CreatedCaves.Add((ScriptVarPointerId, (long)scriptVarPointerPointer, 8));
+        CreatedCaves.Add((ScriptVarPointerId, (long)scriptVar2PointerPointer, 8));
 
-            CcLog.Message("Script var 1 pointer: " + ((long)scriptVarPointerPointer).ToString("X"));
-            CcLog.Message("Script var 2 pointer: " + ((long)scriptVar2PointerPointer).ToString("X"));
+        CcLog.Message("Script var 1 pointer: " + ((long)scriptVarPointerPointer).ToString("X"));
+        CcLog.Message("Script var 2 pointer: " + ((long)scriptVar2PointerPointer).ToString("X"));
 
-            CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
-            scriptVarInstantEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVarPointerPointer);
-            scriptVarTimedEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVar2PointerPointer);
+        CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
+        scriptVarInstantEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVarPointerPointer);
+        scriptVarTimedEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVar2PointerPointer);
 
-            // This script, for each of our script communication variables, hooks to where it is read.
-            // The injected code checks if the one read is the script var with its original value, and
-            // checks also that the nearby "anchor" variables defined in the script match it to avoid
-            // false positives, then writes the pointer on a small code cave.
-            byte[] variableGetter = new byte[]
+        // This script, for each of our script communication variables, hooks to where it is read.
+        // The injected code checks if the one read is the script var with its original value, and
+        // checks also that the nearby "anchor" variables defined in the script match it to avoid
+        // false positives, then writes the pointer on a small code cave.
+        byte[] variableGetter = new byte[]
             {
                 0x52, // push rdx
                 0x48, 0x8B, 0xD1, // mov rdx, rcx
@@ -113,13 +113,12 @@ namespace CrowdControl.Games.Packs.MCCHaloCE
                 0x5A // pop rdx
             );
 
-            byte[] originalWithVariableGetter = SpliceBytes(originalBytes, variableGetter, 0x7).ToArray(); // Inserts before mov eax,[rax+rcx*8+04]
-            byte[] fullCaveCode = AppendUnconditionalJump(originalWithVariableGetter, injectionAddress + bytesToReplaceLength);
+        byte[] originalWithVariableGetter = SpliceBytes(originalBytes, variableGetter, 0x7).ToArray(); // Inserts before mov eax,[rax+rcx*8+04]
+        byte[] fullCaveCode = AppendUnconditionalJump(originalWithVariableGetter, injectionAddress + bytesToReplaceLength);
 
-            long cavePointer = CodeCaveInjection(scriptVarReadingInstruction_ch, bytesToReplaceLength, fullCaveCode);
-            CreatedCaves.Add((ScriptVarPointerId, cavePointer, StandardCaveSizeBytes));
+        long cavePointer = CodeCaveInjection(scriptVarReadingInstruction_ch, bytesToReplaceLength, fullCaveCode);
+        CreatedCaves.Add((ScriptVarPointerId, cavePointer, StandardCaveSizeBytes));
 
-            CcLog.Message("Script communication hook injection finished.----------------------");
-        }
+        CcLog.Message("Script communication hook injection finished.----------------------");
     }
 }
