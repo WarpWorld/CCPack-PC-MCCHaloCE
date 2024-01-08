@@ -1,11 +1,10 @@
-﻿using CrowdControl.Common;
-using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using CrowdControl.Games.Packs.MCCHaloCE.Utilities.InputEmulation;
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Threading;
+using CrowdControl.Common;
+using CrowdControl.Games.Packs.MCCHaloCE.Utilities.InputEmulation;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
 
 public partial class MCCHaloCE
 {
@@ -85,7 +84,7 @@ public partial class MCCHaloCE
                 return true;
             },
             mutex: new string[] { EffectMutex.PlayerSpeed, EffectMutex.PlayerReceivedDamage, EffectMutex.Ammo, EffectMutex.KeyDisable, EffectMutex.KeyPress });
-        act.WhenCompleted.Then(_ =>
+        TaskEx.Then(act.WhenCompleted, _ =>
         {
             // Keybinds
             keyManager.RestoreAllKeyBinds();

@@ -1,11 +1,10 @@
-﻿using CrowdControl.Common;
-using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Timers;
+using CrowdControl.Common;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
 
 // TODO: Apply proper comments after the rework and embedding Inferno's stuff.
 public partial class MCCHaloCE
@@ -57,7 +56,7 @@ public partial class MCCHaloCE
             {
                 if (effect.Message != null)
                 {
-                    instance.Connector.SendMessage(effect.Message);
+                    LifeCycle.MCCHaloCE.instance.Connector.SendMessage(effect.Message);
                 }
                 if (effect.AdditionalStartingAction != null)
                 {
@@ -66,7 +65,7 @@ public partial class MCCHaloCE
 
                 CcLog.Message($"[{DateTime.Now.ToString("hh:mm:ss.fff tt")}]Applying one-shot H1 effect with code {effect.Code}, " +
                               $"queued at {effect.QueuedAt.ToString("MM/dd/yyyy hh:mm:ss.fff tt")}, and duration {effect.DurationInMs}.");
-                instance.SetScriptOneShotEffectH1Variable(effect.Code, effect.DurationInMs);
+                LifeCycle.MCCHaloCE.instance.SetScriptOneShotEffectH1Variable(effect.Code, effect.DurationInMs);
                 if (!oneShotEffectQueue.TryDequeue(out _))
                 {
                     CcLog.Message("Could not dequeue effect, this may cause an infinite loop");
@@ -196,7 +195,7 @@ public partial class MCCHaloCE
             //,
             OneShotEffect.TrulyInfiniteAmmo => () =>
             {
-                TrySetIndirectByteArray(new byte[] { 99, 99, 99, 99 }, basePlayerPointer_ch, FirstGrenadeTypeAmountOffset); // TODO: remember old amounts?
+                TrySetIndirectByteArray(new byte[] { 99, 99, 99, 99 }, basePlayerPointer_ch, Injections.MCCHaloCE.FirstGrenadeTypeAmountOffset); // TODO: remember old amounts?
             }
             ,
             //15 => () => ApplyForce(0, 0, 0.1f),
@@ -206,7 +205,7 @@ public partial class MCCHaloCE
         {
             OneShotEffect.TrulyInfiniteAmmo => () =>
             {
-                TrySetIndirectByteArray(new byte[] { 0x2, 0x2, 0x2, 0x2 }, basePlayerPointer_ch, FirstGrenadeTypeAmountOffset);
+                TrySetIndirectByteArray(new byte[] { 0x2, 0x2, 0x2, 0x2 }, basePlayerPointer_ch, Injections.MCCHaloCE.FirstGrenadeTypeAmountOffset);
             }
             ,
             _ => () => { }
@@ -227,7 +226,7 @@ public partial class MCCHaloCE
             },
             mutex);
 
-        act.WhenCompleted.Then(_ =>
+        TaskEx.Then(act.WhenCompleted, _ =>
         {
             additionalEndAction();
             Connector.SendMessage(endMessage);

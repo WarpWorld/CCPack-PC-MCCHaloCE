@@ -1,8 +1,7 @@
-﻿using CrowdControl.Common;
-using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
+﻿using System;
+using CrowdControl.Common;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
 
 public partial class MCCHaloCE
 {
@@ -14,7 +13,7 @@ public partial class MCCHaloCE
         int dyToRecover = 0;
         bool recoverFrame = false;
         int frameCounter = 0;
-        RepeatAction(request,
+        TaskEx.Then(RepeatAction(request,
             startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
             startAction: () =>
             {
@@ -45,7 +44,7 @@ public partial class MCCHaloCE
             },
             refreshInterval: TimeSpan.FromMilliseconds(33),
             extendOnFail: false,
-            mutex: EffectMutex.MouseForcedMove).WhenCompleted.Then((task) =>
+            mutex: EffectMutex.MouseForcedMove).WhenCompleted, (task) =>
         {
             Connector.SendMessage("Your hands are steady again.");
         });
@@ -54,7 +53,7 @@ public partial class MCCHaloCE
     // Applies mouse movement every frame.
     public void ApplyMovementEveryFrame(EffectRequest request, int dx, int dy, string startMessage, string endMessage)
     {
-        RepeatAction(request,
+        TaskEx.Then(RepeatAction(request,
             startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
             startAction: () =>
             {
@@ -71,7 +70,7 @@ public partial class MCCHaloCE
             },
             refreshInterval: TimeSpan.FromMilliseconds(33),
             extendOnFail: false,
-            mutex: EffectMutex.MouseForcedMove).WhenCompleted.Then((task) =>
+            mutex: EffectMutex.MouseForcedMove).WhenCompleted, (task) =>
         {
             Connector.SendMessage(endMessage);
         });

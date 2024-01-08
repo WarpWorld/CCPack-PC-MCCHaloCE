@@ -1,8 +1,7 @@
-﻿using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
+﻿using System;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
 
 public partial class MCCHaloCE
 {
