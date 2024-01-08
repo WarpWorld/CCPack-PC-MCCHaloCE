@@ -70,7 +70,7 @@ public partial class MCCHaloCE : InjectEffectPack
     ///     When we reach a max level of failures in a row, and more than the max time has elapsed since the last successful IsInGameplayCheck, we start ignoring any pause detection.
     ///     When the periodic IsInGameplayCheck succeeds, we update the date of the last successful IsInGameplayCheck and stop ignoring pause detection if we were.
     /// </remarks>
-    protected override bool IsReady(EffectRequest request)
+    protected override bool IsReady(EffectRequest? request)
     {
         bool isReady = IsInGameplayAndPointersAreOk(request);
         if (isReady)
