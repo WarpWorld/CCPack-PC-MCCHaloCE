@@ -1,10 +1,10 @@
-﻿using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Games.Packs.MCCHaloCE.Utilites.ByteArrayBuilding;
-using System;
+﻿using System;
 using System.Linq;
+using ConnectorLib.Inject.AddressChaining;
+using CrowdControl.Games.Packs.MCCHaloCE.Utilities.ByteArrayBuilding;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Injections;
 
 public partial class MCCHaloCE
 {
@@ -50,8 +50,8 @@ public partial class MCCHaloCE
         (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(scriptVarReadingInstruction_ch, bytesToReplaceLength);
         ReplacedBytes.Add((ScriptVarPointerId, injectionAddress, originalBytes));
 
-        IntPtr scriptVarPointerPointer = CreateCodeCave(ProcessName, 8);
-        IntPtr scriptVar2PointerPointer = CreateCodeCave(ProcessName, 8);
+        IntPtr scriptVarPointerPointer = CreateCodeCave(Packs.MCCHaloCE.MCCHaloCE.ProcessName, 8);
+        IntPtr scriptVar2PointerPointer = CreateCodeCave(Packs.MCCHaloCE.MCCHaloCE.ProcessName, 8);
         CreatedCaves.Add((ScriptVarPointerId, (long)scriptVarPointerPointer, 8));
         CreatedCaves.Add((ScriptVarPointerId, (long)scriptVar2PointerPointer, 8));
 
@@ -113,11 +113,11 @@ public partial class MCCHaloCE
                 0x5A // pop rdx
             );
 
-        byte[] originalWithVariableGetter = SpliceBytes(originalBytes, variableGetter, 0x7).ToArray(); // Inserts before mov eax,[rax+rcx*8+04]
+        byte[] originalWithVariableGetter = Enumerable.ToArray<byte>(SpliceBytes(originalBytes, variableGetter, 0x7)); // Inserts before mov eax,[rax+rcx*8+04]
         byte[] fullCaveCode = AppendUnconditionalJump(originalWithVariableGetter, injectionAddress + bytesToReplaceLength);
 
         long cavePointer = CodeCaveInjection(scriptVarReadingInstruction_ch, bytesToReplaceLength, fullCaveCode);
-        CreatedCaves.Add((ScriptVarPointerId, cavePointer, StandardCaveSizeBytes));
+        CreatedCaves.Add((ScriptVarPointerId, cavePointer, Utilities.MCCHaloCE.StandardCaveSizeBytes));
 
         CcLog.Message("Script communication hook injection finished.----------------------");
     }

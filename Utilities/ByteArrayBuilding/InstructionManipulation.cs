@@ -1,9 +1,8 @@
-﻿using CrowdControl.Games.Packs.MCCHaloCE.Utilites.ByteArrayBuilding;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Utilities.ByteArrayBuilding;
 
 public partial class MCCHaloCE
 {

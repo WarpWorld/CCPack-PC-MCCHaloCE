@@ -1,20 +1,19 @@
-﻿using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Common;
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Timers;
+using ConnectorLib.Inject.AddressChaining;
+using CrowdControl.Common;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.LifeCycle;
 
 // Functionality related to checking and fixing the state in case of changes to the process or game memory.
 public partial class MCCHaloCE
 {
     // Allows us to access the instance form the timer static methods.
-    private static MCCHaloCE instance;
+    private static Utilities.MCCHaloCE instance;
 
     // Base address of halo1.dll in memory. Using relative addresses to this is much more reliable than absolute addresses.
     private AddressChain halo1BaseAddress_ch;
@@ -50,7 +49,7 @@ public partial class MCCHaloCE
             injectionCheckerTimer = null;
         }
 
-        if (!DONT_OVERWRITE)
+        if (!Utilities.MCCHaloCE.DONT_OVERWRITE)
         {
             CreatePeriodicStateChecker();
         }
@@ -85,7 +84,7 @@ public partial class MCCHaloCE
             return true;
         }
 
-        var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionOffset);
+        var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + Injections.MCCHaloCE.ScriptInjectionOffset);
 
         // original instruction is 0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
         // if it is there, the code has been reset and needs to be reinjected. We assume that if one injection was reset, all were.
@@ -140,17 +139,17 @@ public partial class MCCHaloCE
         if (disableEffectQueue)
         {
             CcLog.Message("Disabling H1 one-shot effect queue reading.");
-            oneShotEffectSpacingTimer.Enabled = false;
+            Effects.Implementations.MCCHaloCE.oneShotEffectSpacingTimer.Enabled = false;
         }
 
         CcLog.Message("Restoring memory and freeing caves.");
 
-        foreach (var code in ReplacedBytes.Select(x => x.Identifier).Distinct())
+        foreach (var code in Enumerable.Select<(string Identifier, long Address, byte[] originalBytes), string>(ReplacedBytes, x => x.Identifier).Distinct())
         {
             UndoInjection(code);
         }
         // This second loop should be redundant, but just in case there's a cave not related to a replacement.
-        foreach (var code in CreatedCaves.Select(x => x.Identifier).Distinct())
+        foreach (var code in Enumerable.Select<(string Identifier, long Address, int caveSize), string>(CreatedCaves, x => x.Identifier).Distinct())
         {
             UndoInjection(code);
         }
@@ -193,9 +192,9 @@ public partial class MCCHaloCE
 
             instance.IsProcessReady = true;
             instance.currentlyInGameplay = instance.IsInGameplayCheck();
-            if (oneShotEffectSpacingTimer != null)
+            if (Effects.Implementations.MCCHaloCE.oneShotEffectSpacingTimer != null)
             {
-                oneShotEffectSpacingTimer.Enabled = true;
+                Effects.Implementations.MCCHaloCE.oneShotEffectSpacingTimer.Enabled = true;
             }
         }
         finally
@@ -219,7 +218,7 @@ public partial class MCCHaloCE
                 : $"Current process instance with ID {instance.mccProcess.Id} has exited.");
             CcLog.Message("Looking for new process.");
 
-            var newMccProcess = Process.GetProcessesByName(ProcessName).Where(p => !p.HasExited).FirstOrDefault();
+            var newMccProcess = Process.GetProcessesByName(Packs.MCCHaloCE.MCCHaloCE.ProcessName).Where(p => !p.HasExited).FirstOrDefault();
             if (newMccProcess == null)
             {
                 CcLog.Message("New process not yet found.");

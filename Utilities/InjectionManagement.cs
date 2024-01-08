@@ -1,14 +1,13 @@
-﻿using ConnectorLib.Exceptions;
-using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Common;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
+using ConnectorLib.Exceptions;
+using ConnectorLib.Inject.AddressChaining;
+using CrowdControl.Common;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+namespace CrowdControl.Games.Packs.MCCHaloCE.Utilities;
 
 public partial class MCCHaloCE
 {
@@ -59,7 +58,7 @@ public partial class MCCHaloCE
             {
                 CcLog.Debug("Removing cave");
                 AddressChain.Absolute(Connector, caveAddress).SetBytes(Enumerable.Repeat((byte)0x00, size).ToArray());
-                FreeCave(ProcessName, new IntPtr(caveAddress), size);
+                FreeCave(Packs.MCCHaloCE.MCCHaloCE.ProcessName, new IntPtr(caveAddress), size);
             }
             catch
             {
@@ -113,7 +112,7 @@ public partial class MCCHaloCE
             throw new Exception("Cave bytes are longer than standard allocation.");
         }
 
-        IntPtr cavePointer = CreateCodeCave(ProcessName, StandardCaveSizeBytes);
+        IntPtr cavePointer = CreateCodeCave(Packs.MCCHaloCE.MCCHaloCE.ProcessName, StandardCaveSizeBytes);
 
         CcLog.Message("Cave location: " + ((long)cavePointer).ToString("X"));
 
@@ -143,7 +142,7 @@ public partial class MCCHaloCE
 
         // https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
         // PROCESS_VM_OPERATION, PROCESS_VM_WRITE
-        var hndProc = OpenProcess(0x0008 | 0x0020, 1, proc.Id);
+        var hndProc = Packs.MCCHaloCE.MCCHaloCE.OpenProcess(0x0008 | 0x0020, 1, proc.Id);
 
         // https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualallocex
         // Allocation type: MEM_COMMIT | MEM_RESERVE.
@@ -151,7 +150,7 @@ public partial class MCCHaloCE
         IntPtr caveAddress;
         try
         {
-            caveAddress = VirtualAllocEx(hndProc, (IntPtr)null, cavesize, 0x1000 | 0x2000, 0x40);
+            caveAddress = Packs.MCCHaloCE.MCCHaloCE.VirtualAllocEx(hndProc, (IntPtr)null, cavesize, 0x1000 | 0x2000, 0x40);
         }
         catch (Exception ex)
         {
@@ -160,7 +159,7 @@ public partial class MCCHaloCE
         }
         finally
         {
-            CloseHandle(hndProc);
+            Packs.MCCHaloCE.MCCHaloCE.CloseHandle(hndProc);
         }
 
         return caveAddress;
@@ -171,9 +170,9 @@ public partial class MCCHaloCE
     {
         var proc = Process.GetProcessesByName(process)[0];
 
-        var hndProc = OpenProcess(0x0008 | 0x0020, 1, proc.Id);
+        var hndProc = Packs.MCCHaloCE.MCCHaloCE.OpenProcess(0x0008 | 0x0020, 1, proc.Id);
 
-        return WriteProcessMemory(hndProc, caveAddress, code, code.Length, 0);
+        return Packs.MCCHaloCE.MCCHaloCE.WriteProcessMemory(hndProc, caveAddress, code, code.Length, 0);
     }
 
     // Frees the memory used by a cave.
@@ -181,9 +180,9 @@ public partial class MCCHaloCE
     {
         var proc = Process.GetProcessesByName(process)[0];
 
-        var hndProc = OpenProcess(0x0008, 1, proc.Id);
+        var hndProc = Packs.MCCHaloCE.MCCHaloCE.OpenProcess(0x0008, 1, proc.Id);
 
-        var rel = VirtualFreeEx(hndProc, caveAddress, sizeInBytes, 0x00008000); // MEM_RELEASE
+        var rel = Packs.MCCHaloCE.MCCHaloCE.VirtualFreeEx(hndProc, caveAddress, sizeInBytes, 0x00008000); // MEM_RELEASE
 
         if (rel) { return 1; } else { return 0; } // return 1 if succeeds, 0 if fails.
     }

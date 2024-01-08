@@ -9,6 +9,7 @@ using CrowdControl.Games.Packs.MCCHaloCE.Effects;
 using CrowdControl.Games.Packs.MCCHaloCE.Utilities.InputEmulation;
 using System;
 using System.Collections.Generic;
+using CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
 using CcLog = CrowdControl.Common.Log;
 using ConnectorType = CrowdControl.Common.ConnectorType;
 
