@@ -1,4 +1,4 @@
-﻿//ccpragma { "include" : [ "Effects/ContinuousEffect.cs","Effects/OneShotEffect.cs","Effects/Implementations/ComplexEffects.cs","Effects/Implementations/Ammo.cs", "Effects/Implementations/MouseOverride.cs", "Effects/Implementations/KeyOverride.cs", "Effects/Implementations/ReceivedDamage.cs", "Effects/Implementations/H1ScriptEffects.cs", "Effects/Implementations/ApplyForces.cs", "Effects/Implementations/MovementSpeed.cs", "Effects/Implementations/UnstableAirtime.cs", "Effects/Implementations/PlayerPointerBased.cs", "Effects/EffectMutex.cs", "Effects/CursedHaloEffectList.cs", "DllImports.cs", "Utilities/IndirectPointers.cs", "Utilities/InjectionManagement.cs", "LifeCycle/BaseHaloAddressResult.cs", "LifeCycle/IntegrityControl.cs", "Utilities/Debug.cs", "Utilities/ByteArrayBuilding/ByteArrayExtensions.cs", "Utilities/ByteArrayBuilding/InstructionManipulation.cs", "Utilities/InputEmulation/KeyManager.cs", "Utilities/InputEmulation/KeybindData.cs","Utilities/InputEmulation/GameAction.cs", "Utilities/InputEmulation/User32Imports/InputStructs.cs", "Utilities/InputEmulation/User32Imports/MouseEventFlags.cs","Injections/Player.cs", "Injections/DamageModifier.cs", "Injections/ScriptHooks.cs", "Injections/MovementSpeed.cs", "Injections/UnstableAirtime.cs", "Injections/GameplayPolling.cs", "Injections/LevelSkipper.cs", "Injections/Weapon.cs"] }
+﻿//ccpragma { "include" : [ "Effects/ContinuousEffect.cs","Effects/OneShotEffect.cs","Effects/Implementations/ComplexEffects.cs","Effects/Implementations/Ammo.cs", "Effects/Implementations/MouseOverride.cs", "Effects/Implementations/KeyOverride.cs", "Effects/Implementations/ReceivedDamage.cs", "Effects/Implementations/H1ScriptEffects.cs", "Effects/Implementations/ApplyForces.cs", "Effects/Implementations/MovementSpeed.cs", "Effects/Implementations/UnstableAirtime.cs", "Effects/Implementations/PlayerPointerBased.cs", "Effects/EffectMutex.cs", "Effects/CursedHaloEffectList.cs", "Utilities/IndirectPointers.cs", "Utilities/InjectionManagement.cs", "LifeCycle/BaseHaloAddressResult.cs", "LifeCycle/IntegrityControl.cs", "Utilities/Debug.cs", "Utilities/ByteArrayBuilding/ByteArrayExtensions.cs", "Utilities/ByteArrayBuilding/InstructionManipulation.cs", "Utilities/InputEmulation/KeyManager.cs", "Utilities/InputEmulation/KeybindData.cs","Utilities/InputEmulation/GameAction.cs", "Utilities/InputEmulation/User32Imports/InputStructs.cs", "Utilities/InputEmulation/User32Imports/MouseEventFlags.cs","Injections/Player.cs", "Injections/DamageModifier.cs", "Injections/ScriptHooks.cs", "Injections/MovementSpeed.cs", "Injections/UnstableAirtime.cs", "Injections/GameplayPolling.cs", "Injections/LevelSkipper.cs", "Injections/Weapon.cs"] }
 #define DEVELOPMENT
 
 using ConnectorLib;
@@ -9,7 +9,7 @@ using CrowdControl.Games.Packs.MCCHaloCE.Effects;
 using CrowdControl.Games.Packs.MCCHaloCE.Utilities.InputEmulation;
 using System;
 using System.Collections.Generic;
-using CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
+using System.Runtime.InteropServices;
 using CcLog = CrowdControl.Common.Log;
 using ConnectorType = CrowdControl.Common.ConnectorType;
 
@@ -18,6 +18,10 @@ namespace CrowdControl.Games.Packs.MCCHaloCE;
 public partial class MCCHaloCE : InjectEffectPack
 {
     private const string ProcessName = "MCC-Win64-Shipping";
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     // Makes the game take focus.
     private void BringGameToForeground()
@@ -74,20 +78,6 @@ public partial class MCCHaloCE : InjectEffectPack
     protected override bool IsReady(EffectRequest? request)
     {
         bool isReady = IsInGameplayAndPointersAreOk(request);
-        if (isReady)
-        {
-            ContiguousIsReadyFailures = 0;
-        }
-        else
-        {
-            ContiguousIsReadyFailures += 1;
-        }
-
-        if (ContiguousIsReadyFailures > MaxRetryFailures || (DateTime.Now - lastSuccessfulIsInGameplayCheck) > maxTimeInQueue)
-        {
-            ContiguousIsReadyFailures = 0;
-            TryRepairEternalPause();
-        }
 
         return isReady;
     }
@@ -101,7 +91,19 @@ public partial class MCCHaloCE : InjectEffectPack
             return false;
         }
 
-        var code = FinalCode(request).Split('_');
+        var code = new string[1] { "" };
+        try
+        {
+            code = FinalCode(request).Split('_');
+        }
+        catch (NullReferenceException)
+        {
+            CcLog.Debug("NullReferenceException on call to FinalCode");
+        }
+        catch (KeyNotFoundException)
+        {
+            CcLog.Debug("KeyNotFoundException on call ot FinalCode. Likely a __CC_EMPTY key");
+        }
 
         if (code[0] == "oneshotscripteffect" && !VerifyIndirectPointerIsReady(scriptVarInstantEffectsPointerPointer_ch))
         {
@@ -137,18 +139,15 @@ public partial class MCCHaloCE : InjectEffectPack
     // Returns true if the game is not closed, on a menu, or paused. Returns true on cutscenes.
     private bool IsInGameplay()
     {
-        if (IgnoreIsInGameplayPolling)
-        {
-            CcLog.Message("Ingoring is-in-gameplay check.");
-            return true;
-        }
-
-        if (keyManager.InForcedPause)
-        {
-            CcLog.Message("Actually in gameplay, it is a forced pause.");
-            return true;
-        }
         return currentlyInGameplay;
+    }
+
+    private string[] ReplaceWithRandomEffect()
+    {
+        int index = new Random().Next(1, Effects.Count);
+        Effect effect = Effects.Values.Skip(index).First();
+                
+        return effect.ID.Split('_');
     }
 
     protected override void StartEffect(EffectRequest request)
@@ -157,8 +156,13 @@ public partial class MCCHaloCE : InjectEffectPack
         CcLog.Message(FinalCode(request));
         var code = FinalCode(request).Split('_');
 
-        switch (code[0])
+        while (code[0] == "randomeffect")
         {
+            code = ReplaceWithRandomEffect();
+        }
+
+        switch (code[0])
+        {            
             case "thunderstorm":
             {
                 TryEffect(request, () => IsReady(request),
