@@ -1,7 +1,8 @@
-﻿using System;
-using CrowdControl.Common;
+﻿using CrowdControl.Common;
+using CrowdControl.Games.Packs.MCCHaloCE.Effects;
+using System;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE.Effects.Implementations;
+namespace CrowdControl.Games.Packs.MCCHaloCE;
 
 public enum ShieldRegenEffectType
 {
@@ -54,7 +55,7 @@ public partial class MCCHaloCE
             ShieldRegenEffectType.Instant => "gave you a fast regenerating shield."
         };
 
-        TaskEx.Then(RepeatAction(request, () => IsReady(request),
+        RepeatAction(request, () => IsReady(request),
             () => Connector.SendMessage($"{request.DisplayViewer} {message}"),
             TimeSpan.FromSeconds(1),
             () => IsReady(request),
@@ -62,7 +63,7 @@ public partial class MCCHaloCE
             () => TrySetIndirectShort(regenValue, basePlayerPointer_ch, ShieldRegenOffset, false),
             TimeSpan.FromMilliseconds(500),
             false,
-            EffectMutex.SetShield).WhenCompleted, _ =>
+            EffectMutex.SetShield).WhenCompleted.Then(_ =>
         {
             TrySetIndirectShort(0, basePlayerPointer_ch, ShieldRegenOffset, false);
             Connector.SendMessage("Shields are back to normal.");
@@ -121,51 +122,51 @@ public partial class MCCHaloCE
     // Increases health every interval.
     public void GiveHealthRegen(EffectRequest request, float valuePerTick, int tickIntervalInMs)
     {
-        TaskEx.Then(RepeatAction(request,
-                    () => IsReady(request),
-                    () =>
+        RepeatAction(request,
+                () => IsReady(request),
+                () =>
+                {
+                    if (valuePerTick > 0)
                     {
-                        if (valuePerTick > 0)
-                        {
-                            QueueOneShotEffect((short)OneShotEffect.Heal, 0);
-                        }
-                        else
-                        {
-                            QueueOneShotEffect((short)OneShotEffect.OneHp, 0);
-                        }
-
-                        Connector.SendMessage($"{request.DisplayViewer} gave you health regeneration.");
-                        return true;
-                    },
-                    TimeSpan.FromSeconds(1),
-                    () => IsReady(request),
-                    TimeSpan.FromMilliseconds(500),
-                    () =>
+                        QueueOneShotEffect((short)OneShotEffect.Heal, 0);
+                    }
+                    else
                     {
-                        if (!TryGetIndirectByteArray(basePlayerPointer_ch, HealthOffset, 4, out byte[] data))
-                        {
-                            return false;
-                        }
+                        QueueOneShotEffect((short)OneShotEffect.OneHp, 0);
+                    }
 
-                        float currentHealth = BitConverter.ToSingle(data);
+                    Connector.SendMessage($"{request.DisplayViewer} gave you health regeneration.");
+                    return true;
+                },
+                TimeSpan.FromSeconds(1),
+                () => IsReady(request),
+                TimeSpan.FromMilliseconds(500),
+                () =>
+                {
+                    if (!TryGetIndirectByteArray(basePlayerPointer_ch, HealthOffset, 4, out byte[] data))
+                    {
+                        return false;
+                    }
 
-                        currentHealth += valuePerTick;
+                    float currentHealth = BitConverter.ToSingle(data);
 
-                        if (currentHealth > 1)
-                        {
-                            currentHealth = 1;
-                        }
-                        if (currentHealth < 0)
-                        {
-                            currentHealth = 0.01f;
-                        }
+                    currentHealth += valuePerTick;
 
-                        return SetHealth(currentHealth, false);
-                    },
-                    TimeSpan.FromMilliseconds(tickIntervalInMs),
-                    false,
-                    Guid.NewGuid().ToString())// Using a random mutext because null caused function signature ambiguity.
-                .WhenCompleted, _ =>
+                    if (currentHealth > 1)
+                    {
+                        currentHealth = 1;
+                    }
+                    if (currentHealth < 0)
+                    {
+                        currentHealth = 0.01f;
+                    }
+
+                    return SetHealth(currentHealth, false);
+                },
+                TimeSpan.FromMilliseconds(tickIntervalInMs),
+                false,
+                Guid.NewGuid().ToString())// Using a random mutext because null caused function signature ambiguity.
+            .WhenCompleted.Then(_ =>
             {
                 Connector.SendMessage("Health regeneration ended.");
             });
@@ -175,7 +176,7 @@ public partial class MCCHaloCE
     public void OneHealthAndADream(EffectRequest request)
     {
         float previousHealth = 1;
-        TaskEx.Then(StartTimed(request,
+        StartTimed(request,
             startCondition: () => IsReady(request),
             continueCondition: () => IsReady(request),
             continueConditionInterval: TimeSpan.FromMilliseconds(500),
@@ -187,7 +188,7 @@ public partial class MCCHaloCE
                 previousHealth = BitConverter.ToSingle(healthBytes);
                 return TrySetIndirectFloat(0.01f, basePlayerPointer_ch, HealthOffset, false);
             },
-            EffectMutex.SetHealth).WhenCompleted, _ =>
+            EffectMutex.SetHealth).WhenCompleted.Then(_ =>
         {
             Connector.SendMessage($"Critical state healed.");
             TrySetIndirectFloat(previousHealth, basePlayerPointer_ch, HealthOffset, false);
@@ -201,7 +202,7 @@ public partial class MCCHaloCE
         TryEffect(request, () => IsReady(request),
             () =>
             {
-                if (!TryGetIndirectByteArray(basePlayerPointer_ch, Injections.MCCHaloCE.FirstGrenadeTypeAmountOffset, 4, out byte[] grenadeValues))
+                if (!TryGetIndirectByteArray(basePlayerPointer_ch, FirstGrenadeTypeAmountOffset, 4, out byte[] grenadeValues))
                 {
                     return false;
                 }
@@ -228,7 +229,7 @@ public partial class MCCHaloCE
                     grenadeValues[i] = BitConverter.GetBytes(value)[0];
                 }
 
-                if (!TrySetIndirectByteArray(grenadeValues, basePlayerPointer_ch, Injections.MCCHaloCE.FirstGrenadeTypeAmountOffset))
+                if (!TrySetIndirectByteArray(grenadeValues, basePlayerPointer_ch, FirstGrenadeTypeAmountOffset))
                 {
                     return false;
                 }
