@@ -166,7 +166,7 @@ public static class CursedHaloEffectList
         new("Grenades: Steal 6 of each", "grenades_take") { Category = WeaponsAndAmmo,
             Description = "Takes 6 grenades away of each type.", Price = (uint) (500 * PRICINGFACTOR )},
         new("Give unsafe checkpoint", "oneshotscripteffect_" + (int)OneShotEffect.GiveUnsafeCheckpoint) { Category = OdditiesCategory,
-            Description = "Gives a checkpoint immediately, regardless of if the player is about to die or falling to their doom.", Price = (uint) (1700 * PRICINGFACTOR )},
+            Description = "Gives a checkpoint immediately, regardless of if the player is about to die or falling to their doom.", Price = (uint) (500 * PRICINGFACTOR )},
         new("Shove", "addspeed_shove1") { Category = SpeedAndMovementCategory,
             Description = "Shove the player in a random direction and strength. Does not work on vehicles.", Price = (uint) (750 * PRICINGFACTOR /*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/)},
         new("The shakes", "addspeed_shake") { Category = SpeedAndMovementCategory, Duration = 7,
