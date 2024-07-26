@@ -1,20 +1,20 @@
-﻿using System;
+﻿using ConnectorLib.Inject.AddressChaining;
+using CrowdControl.Games.Packs.MCCHaloCE.Utilites.ByteArrayBuilding;
+using System;
 using System.Linq;
-using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Games.Packs.MCCHaloCE.Utilities.ByteArrayBuilding;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE.Injections;
+namespace CrowdControl.Games.Packs.MCCHaloCE;
 
 public partial class MCCHaloCE
 {
-    private const long ScriptInjectionOffset = 0xACC0E9;
+    private const long ScriptInjectionOffset = 0xACC0F1;
 
     // Points to where the injected code store the variables we use to communicate with the H1 scripts.
     private AddressChain? scriptVarInstantEffectsPointerPointer_ch = null;
 
-    // Note: This points to the first var. Any others will be referred using a multiple of 8 offset on the value pointed by this one.
-    private AddressChain? scriptVarTimedEffectsPointerPointer_ch = null;
+    // Points to a variable that the game scripts are constantly changing. If it has not changed after more than one frame (assuming 30fps), the game is paused, as scripts don't run during pauses or out of the game.
+    private AddressChain? scriptVarPauseDetection_ch = null;
 
     // Continuous script variables use bits in a script variable to be activated. Hence there's a max after which we need to use another variable.
     private const int MaxContinousScriptEffectSlotPerVar = 30;
@@ -24,7 +24,7 @@ public partial class MCCHaloCE
 
     /// <summary>
     /// Inserts code that writes pointers to the scripts variables, <see cref="scriptVarInstantEffectsPointerPointer_ch"/>
-    /// and <see cref="scriptVarTimedEffectsPointerPointer_ch"/>, which allows the effect pack to communicate with the H1 scripts.
+    /// and <see cref="scriptVarPauseDetection_ch"/>, which allows the effect pack to communicate with the H1 scripts.
     /// </summary>
     private void InjectScriptHook()
     {
@@ -50,8 +50,8 @@ public partial class MCCHaloCE
         (long injectionAddress, byte[] originalBytes) = GetOriginalBytes(scriptVarReadingInstruction_ch, bytesToReplaceLength);
         ReplacedBytes.Add((ScriptVarPointerId, injectionAddress, originalBytes));
 
-        IntPtr scriptVarPointerPointer = CreateCodeCave(Packs.MCCHaloCE.MCCHaloCE.ProcessName, 8);
-        IntPtr scriptVar2PointerPointer = CreateCodeCave(Packs.MCCHaloCE.MCCHaloCE.ProcessName, 8);
+        IntPtr scriptVarPointerPointer = CreateCodeCave(ProcessName, 8);
+        IntPtr scriptVar2PointerPointer = CreateCodeCave(ProcessName, 8);
         CreatedCaves.Add((ScriptVarPointerId, (long)scriptVarPointerPointer, 8));
         CreatedCaves.Add((ScriptVarPointerId, (long)scriptVar2PointerPointer, 8));
 
@@ -60,7 +60,7 @@ public partial class MCCHaloCE
 
         CcLog.Message("Injection address: " + injectionAddress.ToString("X"));
         scriptVarInstantEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVarPointerPointer);
-        scriptVarTimedEffectsPointerPointer_ch = AddressChain.Absolute(Connector, (long)scriptVar2PointerPointer);
+        scriptVarPauseDetection_ch = AddressChain.Absolute(Connector, (long)scriptVar2PointerPointer);
 
         // This script, for each of our script communication variables, hooks to where it is read.
         // The injected code checks if the one read is the script var with its original value, and
@@ -92,14 +92,16 @@ public partial class MCCHaloCE
                 0x58, // pop rax
                 0xEB).AppendRelativePointer("popPushedRegistersAndEnd", 0x33) //jmp pop rdx (31)
             .LocalJumpLocation("checkIfScriptVar2").Append(
-                0x81, 0x3A, 0x00, 0x00, 0x00, 0x40, // cmp [rdx], 0x40 00 00 00 ;compare to initial value of var
-                0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x2B) // jne 0x2B to "pop rdx" to avoid storing any variable that isn't our marker
+                0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // NOP to remove the check for a specific var value that I commented out, since this one will be changing constantly, and we need to dely on the landmarks
+                0x90, 0x90)
+                //0x81, 0x3A, 0xCD, 0xAB, 0x34, 0x12, // cmp [rdx], 0x40 00 00 00 ;compare to initial value of var
+                //0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x2B) // jne 0x2B to "pop rdx" to avoid storing any variable that isn't our marker
             .Append(
-                0x48, 0x83, 0xC2, 0x010, // add rdx,010 (8*2)
+                0x48, 0x83, 0xC2, 0x08, // add rdx,08
                 0x81, 0x3A, 0x09, 0xA4, 0x5D, 0x2E,//cmp [rdx],2E5DA409 ; compare to value of right anchor, 777888777
                 0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x1F) //jne (0X1F), to pop prdx
             .Append(
-                0x48, 0x83, 0xEA, 0x18,//sub rdx,18
+                0x48, 0x83, 0xEA, 0x10,//sub rdx,10 (8x2)
                 0x81, 0x3A, 0xB1, 0xD0, 0x5E, 0x07,//cmp [rdx],75ED0B1 L compare to value of left anchor 123654321)
                 0x75).AppendRelativePointer("popPushedRegistersAndEnd", 0x13)  //jne 0x13, to pop rdx
             .Append(
@@ -113,11 +115,11 @@ public partial class MCCHaloCE
                 0x5A // pop rdx
             );
 
-        byte[] originalWithVariableGetter = Enumerable.ToArray<byte>(SpliceBytes(originalBytes, variableGetter, 0x7)); // Inserts before mov eax,[rax+rcx*8+04]
+        byte[] originalWithVariableGetter = SpliceBytes(originalBytes, variableGetter, 0x7).ToArray(); // Inserts before mov eax,[rax+rcx*8+04]
         byte[] fullCaveCode = AppendUnconditionalJump(originalWithVariableGetter, injectionAddress + bytesToReplaceLength);
 
         long cavePointer = CodeCaveInjection(scriptVarReadingInstruction_ch, bytesToReplaceLength, fullCaveCode);
-        CreatedCaves.Add((ScriptVarPointerId, cavePointer, Utilities.MCCHaloCE.StandardCaveSizeBytes));
+        CreatedCaves.Add((ScriptVarPointerId, cavePointer, StandardCaveSizeBytes));
 
         CcLog.Message("Script communication hook injection finished.----------------------");
     }
