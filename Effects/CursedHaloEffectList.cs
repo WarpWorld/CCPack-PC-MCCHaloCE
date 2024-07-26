@@ -18,6 +18,7 @@ public static class CursedHaloEffectList
     public const string VisibilityAndHudCategory = "Visibility and HUD";
     public const string ControlsOverride = "Controls override";
     public const string Discarded = "Discarded. May not work anymore.";
+    public const string RandomCategory = "Random effects.";
 
     private const float PRICINGFACTOR = 0.1f;
     public static EffectList Effects = new List<Effect> {
@@ -32,7 +33,7 @@ public static class CursedHaloEffectList
 //#endif
 
         // New stuff
-        new("Trigger a random effect", "randomeffect") { Category = Random, Duration = 30,
+        new("Trigger a random effect", "randomeffect") { Category = RandomCategory, Duration = 30,
             Description = "Activate a random CC effect, from the puniest to the harshest. All have the same chances of being selected. Timed ones will last 30 seconds.", Price = (uint)(500 * PRICINGFACTOR)},
         // -----
         new("Take half of the current weapon ammo", "takeammo_half") {Category = WeaponsAndAmmo,
