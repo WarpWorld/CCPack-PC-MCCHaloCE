@@ -18,6 +18,7 @@ public static class CursedHaloEffectList
     public const string VisibilityAndHudCategory = "Visibility and HUD";
     public const string ControlsOverride = "Controls override";
     public const string Discarded = "Discarded. May not work anymore.";
+    public const string RandomCategory = "Random effects.";
 
     private const float PRICINGFACTOR = 0.1f;
     public static EffectList Effects = new List<Effect> {
@@ -32,6 +33,9 @@ public static class CursedHaloEffectList
 //#endif
 
         // New stuff
+        new("Trigger a random effect", "randomeffect") { Category = RandomCategory, Duration = 30,
+            Description = "Activate a random CC effect, from the puniest to the harshest. All have the same chances of being selected. Timed ones will last 30 seconds.", Price = (uint)(500 * PRICINGFACTOR)},
+        // -----
         new("Take half of the current weapon ammo", "takeammo_half") {Category = WeaponsAndAmmo,
             Description = "Yoink half of the ammo/battery of the currently held weapon.", Price = (uint) (500 * PRICINGFACTOR /*, ScaleFactor = 1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/)},
         new("Take all of the current weapon ammo", "takeammo_all") {Category = WeaponsAndAmmo,
@@ -162,7 +166,7 @@ public static class CursedHaloEffectList
         new("Grenades: Steal 6 of each", "grenades_take") { Category = WeaponsAndAmmo,
             Description = "Takes 6 grenades away of each type.", Price = (uint) (500 * PRICINGFACTOR )},
         new("Give unsafe checkpoint", "oneshotscripteffect_" + (int)OneShotEffect.GiveUnsafeCheckpoint) { Category = OdditiesCategory,
-            Description = "Gives a checkpoint immediately, regardless of if the player is about to die or falling to their doom.", Price = (uint) (1700 * PRICINGFACTOR )},
+            Description = "Gives a checkpoint immediately, regardless of if the player is about to die or falling to their doom.", Price = (uint) (500 * PRICINGFACTOR )},
         new("Shove", "addspeed_shove1") { Category = SpeedAndMovementCategory,
             Description = "Shove the player in a random direction and strength. Does not work on vehicles.", Price = (uint) (750 * PRICINGFACTOR /*, ScaleFactor=1.3f, ScaleDecayTime = TimeSpan.FromMinutes(1)*/)},
         new("The shakes", "addspeed_shake") { Category = SpeedAndMovementCategory, Duration = 7,

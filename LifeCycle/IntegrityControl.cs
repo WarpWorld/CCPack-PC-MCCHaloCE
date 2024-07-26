@@ -1,19 +1,21 @@
-﻿using System;
+﻿using ConnectorLib.Inject.AddressChaining;
+using CrowdControl.Common;
+using CrowdControl.Games.Packs.MCCHaloCE.LifeCycle;
+using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Timers;
-using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Common;
 using CcLog = CrowdControl.Common.Log;
 
-namespace CrowdControl.Games.Packs.MCCHaloCE.LifeCycle;
+namespace CrowdControl.Games.Packs.MCCHaloCE;
 
 // Functionality related to checking and fixing the state in case of changes to the process or game memory.
 public partial class MCCHaloCE
 {
     // Allows us to access the instance form the timer static methods.
-    private static Utilities.MCCHaloCE instance;
+    private static MCCHaloCE instance;
 
     // Base address of halo1.dll in memory. Using relative addresses to this is much more reliable than absolute addresses.
     private AddressChain halo1BaseAddress_ch;
@@ -26,13 +28,6 @@ public partial class MCCHaloCE
 
     // Periodically checks if injections are needed.
     private static System.Timers.Timer injectionCheckerTimer;
-
-    // In the rare conditions where pause detection fails, this allows us to skip it to avoid jamming the effect queue.
-    // It will be set back to false on a successful IsInGamePlayCheck.
-    private bool IgnoreIsInGameplayPolling = false;
-
-    // These variables allow us to check if some effect is seemingly stuck in the queue.
-    private DateTime lastSuccessfulIsInGameplayCheck = DateTime.MinValue;
 
     private int ContiguousIsReadyFailures = 0;
     private const int MaxRetryFailures = 40;
@@ -49,7 +44,7 @@ public partial class MCCHaloCE
             injectionCheckerTimer = null;
         }
 
-        if (!Utilities.MCCHaloCE.DONT_OVERWRITE)
+        if (!DONT_OVERWRITE)
         {
             CreatePeriodicStateChecker();
         }
@@ -84,7 +79,7 @@ public partial class MCCHaloCE
             return true;
         }
 
-        var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + Injections.MCCHaloCE.ScriptInjectionOffset);
+        var scriptVarReadingInstruction_ch = AddressChain.Absolute(Connector, halo1BaseAddress + ScriptInjectionOffset);
 
         // original instruction is 0x48, 0x63, 0x42, 0x34, // movsxd  rax,dword ptr [rdx+34]
         // if it is there, the code has been reset and needs to be reinjected. We assume that if one injection was reset, all were.
@@ -117,7 +112,6 @@ public partial class MCCHaloCE
 
         InjectScriptHook();
         InjectPlayerBaseReader();
-        InjectIsInGameplayPolling();
         InjectLevelSkipper();
         InjectAllWeaponClipAmmoReaders();
 
@@ -139,17 +133,17 @@ public partial class MCCHaloCE
         if (disableEffectQueue)
         {
             CcLog.Message("Disabling H1 one-shot effect queue reading.");
-            Effects.Implementations.MCCHaloCE.oneShotEffectSpacingTimer.Enabled = false;
+            oneShotEffectSpacingTimer.Enabled = false;
         }
 
         CcLog.Message("Restoring memory and freeing caves.");
 
-        foreach (var code in Enumerable.Select<(string Identifier, long Address, byte[] originalBytes), string>(ReplacedBytes, x => x.Identifier).Distinct())
+        foreach (var code in ReplacedBytes.Select(x => x.Identifier).Distinct())
         {
             UndoInjection(code);
         }
         // This second loop should be redundant, but just in case there's a cave not related to a replacement.
-        foreach (var code in Enumerable.Select<(string Identifier, long Address, int caveSize), string>(CreatedCaves, x => x.Identifier).Distinct())
+        foreach (var code in CreatedCaves.Select(x => x.Identifier).Distinct())
         {
             UndoInjection(code);
         }
@@ -192,9 +186,9 @@ public partial class MCCHaloCE
 
             instance.IsProcessReady = true;
             instance.currentlyInGameplay = instance.IsInGameplayCheck();
-            if (Effects.Implementations.MCCHaloCE.oneShotEffectSpacingTimer != null)
+            if (oneShotEffectSpacingTimer != null)
             {
-                Effects.Implementations.MCCHaloCE.oneShotEffectSpacingTimer.Enabled = true;
+                oneShotEffectSpacingTimer.Enabled = true;
             }
         }
         finally
@@ -218,7 +212,7 @@ public partial class MCCHaloCE
                 : $"Current process instance with ID {instance.mccProcess.Id} has exited.");
             CcLog.Message("Looking for new process.");
 
-            var newMccProcess = Process.GetProcessesByName(Packs.MCCHaloCE.MCCHaloCE.ProcessName).Where(p => !p.HasExited).FirstOrDefault();
+            var newMccProcess = Process.GetProcessesByName(ProcessName).Where(p => !p.HasExited).FirstOrDefault();
             if (newMccProcess == null)
             {
                 CcLog.Message("New process not yet found.");
@@ -312,71 +306,10 @@ public partial class MCCHaloCE
         return BaseHaloAddressResult.WasAlreadyCorrect;
     }
 
-    // Tries to fix causes that may make the effect pack thing the game is stuck.
-    private void TryRepairEternalPause()
-    {
-        injectionCheckerTimer.Enabled = false;
-        try
-        {
-            bool isGameplayPollingPointerNotSet = false;
-            bool isGameplayPollingVarStillZero = false;
-            if (isInGameplayPollingPointer == null || !isInGameplayPollingPointer.TryGetLong(out long value))
-            {
-                // The variable is not properly set.
-                isGameplayPollingPointerNotSet = true;
-            }
-            else if (value == 0)
-            {
-                isGameplayPollingVarStillZero = true;
-            }
-
-            // If any of the pointers is not set, reset script variables, reinject all, and copy the level skip if any.
-
-            try
-            {
-                ResetInjectionsAndScriptVariables();
-            }
-            catch (Exception ex) { CcLog.Error(ex, "Exception while attempting to reset scripts to avoid a jammed queue."); }
-
-            // Verify if the polling pointer was properly set.
-            if (isInGameplayPollingPointer == null || !isInGameplayPollingPointer.TryGetLong(out value))
-            {
-                // The polling is failing. Override pausing.
-                IgnoreIsInGameplayPolling = true;
-                CcLog.Message("Gameplay polling is failing. Override pausing.");
-            }
-            // Verify if the variable is still stuck.
-            else
-            {
-                Thread.Sleep(200);
-
-                if (!isInGameplayPollingPointer.TryGetLong(out long newValue) || newValue == value)
-                {
-                    CcLog.Message("Gameplay polling var is not being updated. Override pausing.");
-                    IgnoreIsInGameplayPolling = true;
-                }
-            }
-        }
-        finally
-        {
-            injectionCheckerTimer.Enabled = true;
-        }
-    }
 
     private void ResetInjectionsAndScriptVariables()
     {
-        int continuousVarDefault = 0x40000000;
         int oneShotVarDefault = 0x3456ABCD;
-
-        // Reset continous effect script communication variable.
-        if (VerifyIndirectPointerIsReady(scriptVarTimedEffectsPointerPointer_ch))
-        {
-            CcLog.Message("Resetting cont script var.");
-            if (!scriptVarTimedEffectsPointerPointer_ch.TrySetInt(continuousVarDefault))
-            {
-                CcLog.Error("Could not reset continuous effect script variable.");
-            }
-        }
 
         if (VerifyIndirectPointerIsReady(scriptVarInstantEffectsPointerPointer_ch))
         {
