@@ -1,7 +1,4 @@
-﻿using ConnectorLib.Inject.AddressChaining;
-using System;
-using System.Linq;
-using CcLog = CrowdControl.Common.Log;
+﻿using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
 
@@ -27,9 +24,9 @@ public partial class MCCHaloCE
             return false;
         }
 
-        if(!TryGetIndirectByteArray(scriptVarPauseDetection_ch, offset: 0, byteAmount: 4, out byte[] counterRawBytes))
+        if(!TryGetIndirectByteArray(scriptVarPauseDetection_ch, 0, 4, out byte[] counterRawBytes))
         {
-            CcLog.Message("Could not retrieve the gameplay polling variable.");
+            CcLog.Debug("Could not retrieve the gameplay polling variable.");
         }
 
         int value = BitConverter.ToInt32(counterRawBytes, 0);

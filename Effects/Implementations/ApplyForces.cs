@@ -1,6 +1,5 @@
 ﻿using CrowdControl.Common;
 using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
 

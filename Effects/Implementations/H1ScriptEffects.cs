@@ -1,8 +1,7 @@
-﻿using CrowdControl.Common;
-using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Timers;
+using CrowdControl.Common;
+using CrowdControl.Games.Packs.MCCHaloCE.Effects;
 using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
@@ -117,7 +116,7 @@ public partial class MCCHaloCE
 
         string? mutex = slot switch
         {
-            _ => null,
+            _ => Guid.NewGuid().ToString(),
         };
 
         Action additionalStartAction = slot switch
@@ -134,8 +133,7 @@ public partial class MCCHaloCE
 
                 return true;
             },
-            true,
-            mutex);
+            mutex: mutex);
     }
 
     public void ApplyContinuousEffect(EffectRequest request, int slot)
@@ -168,7 +166,7 @@ public partial class MCCHaloCE
             //15 => new string[] { EffectMutex.Gravity },
             //17 => new string[] { EffectMutex.ObjectLightScale },
             //18 => new string[] { EffectMutex.ObjectLightScale },
-            _ => null,
+            _ => [Guid.NewGuid().ToString()],
         };
 
         Action additionalStartAction = effect switch

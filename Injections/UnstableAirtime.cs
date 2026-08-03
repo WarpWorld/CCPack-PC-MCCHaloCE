@@ -1,5 +1,5 @@
-﻿using ConnectorLib.Inject.AddressChaining;
-using System.Linq;
+﻿using AddressChain = ConnectorLib.Memory.AddressChain<ConnectorLib.Inject.InjectConnector>;
+using CrowdControl.Games.Packs.MCCHaloCE.Utilites.ByteArrayBuilding;
 using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;

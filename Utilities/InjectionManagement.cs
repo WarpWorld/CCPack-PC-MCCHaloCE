@@ -1,12 +1,7 @@
-﻿using ConnectorLib.Exceptions;
-using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Common;
-using System;
-using System.Collections.Generic;
+﻿using ConnectorLib;
+using ConnectorLib.Inject.Exceptions;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using ConnectorLib;
+using AddressChain = ConnectorLib.Memory.AddressChain<ConnectorLib.Inject.InjectConnector>;
 using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
@@ -152,7 +147,7 @@ public partial class MCCHaloCE
         IntPtr caveAddress;
         try
         {
-            caveAddress = NativeMethods.VirtualAllocEx(hndProc, (IntPtr)null, (uint)cavesize, (NativeMethods.AllocationTypeEnum)(0x1000 | 0x2000), (NativeMethods.MemoryProtectionEnum)0x40);
+            caveAddress = NativeMethods.VirtualAllocEx(hndProc, (IntPtr)null, (uint)cavesize, (NativeMethods.AllocationTypeEnum)(0x1000 | 0x2000), (NativeMethods.AllocationProtectEnum)0x40);
         }
         catch (Exception ex)
         {
@@ -161,7 +156,11 @@ public partial class MCCHaloCE
         }
         finally
         {
-            NativeMethods.CloseHandle(hndProc);
+            var result = NativeMethods.CloseHandle(hndProc);
+            if (!result)
+            {
+                CcLog.Error("Failed to close a process handle");
+            }
         }
 
         return caveAddress;
