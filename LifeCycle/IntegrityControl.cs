@@ -1,12 +1,7 @@
-﻿using ConnectorLib.Inject.AddressChaining;
-using CrowdControl.Common;
-using CrowdControl.Games.Packs.MCCHaloCE.LifeCycle;
-using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading;
+﻿using System.Diagnostics;
 using System.Timers;
+using AddressChain = ConnectorLib.Memory.AddressChain<ConnectorLib.Inject.InjectConnector>;
+using CrowdControl.Games.Packs.MCCHaloCE.LifeCycle;
 using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;

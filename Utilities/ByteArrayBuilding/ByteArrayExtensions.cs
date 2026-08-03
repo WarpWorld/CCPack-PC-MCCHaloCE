@@ -1,7 +1,4 @@
-﻿using System;
-using System.Linq;
-
-namespace CrowdControl.Games.Packs.MCCHaloCE;
+﻿namespace CrowdControl.Games.Packs.MCCHaloCE.Utilites.ByteArrayBuilding;
 
 // Utility methods to make the byte arrays created to inject easier to read.
 public static class ByteArrayExtensions

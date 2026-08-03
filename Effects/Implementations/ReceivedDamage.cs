@@ -1,6 +1,5 @@
 ﻿using CrowdControl.Common;
 using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System.Collections.Generic;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
 
@@ -23,7 +22,7 @@ public partial class MCCHaloCE
         if (playerFactor != null) { mutex.Add(EffectMutex.PlayerReceivedDamage); }
         if (npcFactor != null || instakillEnemies != null) { mutex.Add(EffectMutex.NPCReceivedDamage); }
         StartTimed(request,
-                () => { return IsReady(request) && PlayerReceivedDamageFactor == 1 && OthersReceivedDamageFactor == 1 && !InstakillEnemies; },
+                () => IsReady(request),
                 () =>
                 {
                     if (sound != null)
@@ -101,5 +100,22 @@ public partial class MCCHaloCE
 
                 UndoInjection(OnDamageConditionalId);
             });
+        }
+
+    public void SetDamageFactorsWithoutEffect(float? playerFactor, float? npcFactor, bool? instakillEnemies)
+    {
+        if (playerFactor != null)
+        {
+            PlayerReceivedDamageFactor = playerFactor ?? 1;
+        }
+        if (npcFactor != null)
+        {
+            OthersReceivedDamageFactor = npcFactor ?? 1;
+        }
+        if (instakillEnemies != null)
+        {
+            InstakillEnemies = instakillEnemies ?? false;
+        }
+        InjectConditionalDamageMultiplier();
     }
 }

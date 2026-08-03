@@ -1,6 +1,5 @@
 ﻿using CrowdControl.Common;
 using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
 
@@ -15,16 +14,16 @@ public partial class MCCHaloCE
         bool recoverFrame = false;
         int frameCounter = 0;
         RepeatAction(request,
-            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
-            startAction: () =>
+            () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+            () =>
             {
                 Connector.SendMessage($"{request.DisplayViewer} gave you 299 cups of coffee.");
                 return true;
             },
-            startRetry: TimeSpan.FromSeconds(1),
-            refreshCondition: () => IsInGameplay(),
-            refreshRetry: TimeSpan.FromMilliseconds(500),
-            refreshAction: () =>
+            TimeSpan.FromSeconds(1),
+            () => IsInGameplay(),
+            TimeSpan.FromMilliseconds(500),
+            () =>
             {
                 recoverFrame = frameCounter > 0 && frameCounter % recoveryFrameInterval == 0;
                 BringGameToForeground();
@@ -43,9 +42,9 @@ public partial class MCCHaloCE
                 dyToRecover += dy;
                 return keyManager.ForceMouseMove(dx, dy);
             },
-            refreshInterval: TimeSpan.FromMilliseconds(33),
-            extendOnFail: false,
-            mutex: EffectMutex.MouseForcedMove).WhenCompleted.Then((task) =>
+            TimeSpan.FromMilliseconds(33),
+            false,
+            EffectMutex.MouseForcedMove).WhenCompleted.Then((task) =>
         {
             Connector.SendMessage("Your hands are steady again.");
         });
@@ -55,23 +54,23 @@ public partial class MCCHaloCE
     public void ApplyMovementEveryFrame(EffectRequest request, int dx, int dy, string startMessage, string endMessage)
     {
         RepeatAction(request,
-            startCondition: () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
-            startAction: () =>
+            () => IsReady(request) && keyManager.EnsureKeybindsInitialized(halo1BaseAddress),
+            () =>
             {
                 Connector.SendMessage($"{request.DisplayViewer} {startMessage}");
                 return true;
             },
-            startRetry: TimeSpan.FromSeconds(1),
-            refreshCondition: () => IsInGameplay(),
-            refreshRetry: TimeSpan.FromMilliseconds(500),
-            refreshAction: () =>
+            TimeSpan.FromSeconds(1),
+            () => IsInGameplay(),
+            TimeSpan.FromMilliseconds(500),
+            () =>
             {
                 BringGameToForeground();
                 return keyManager.ForceMouseMove(dx, dy);
             },
-            refreshInterval: TimeSpan.FromMilliseconds(33),
-            extendOnFail: false,
-            mutex: EffectMutex.MouseForcedMove).WhenCompleted.Then((task) =>
+            TimeSpan.FromMilliseconds(33),
+            false,
+            EffectMutex.MouseForcedMove).WhenCompleted.Then((task) =>
         {
             Connector.SendMessage(endMessage);
         });

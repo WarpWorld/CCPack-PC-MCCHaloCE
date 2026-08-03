@@ -27,14 +27,6 @@ Also, every injection is based on the base address of halo1.dll, which is loaded
 - Utilities contains methods used by all the other code.
 - HaloFiles contains the H1 script code relevant to the effect pack. Note that to modify this it needs to be added on each level of the Cursed Halo source code and rebuild such levels.
 
-## How to compile halo maps
-
-1. Download the Halo: CE Mod Tools - MCC on steam, and open its folder (On the steam library, Right click->Manage->Browse local files). You should be on a folder named HCEEK.
-3. Run HCEEK (Extract).bat
-4. Copy the contents of HaloFiles/ccHaloModifiedSource in HCEEK, so that the data and tags subfolders merge.
-5. Copy tool_classicBuildEverything(in HaloFiles) to the HCEEK folder and run it.
-6. All the modified maps should be in the maps folder in HCEEK. You can now use them to replace the Halo 1 campaign maps.
-
 ## Contributing
 
 If you want to update broken injections or add new effects, feel free to create a pull request.

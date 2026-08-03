@@ -1,5 +1,4 @@
 ﻿using CrowdControl.Games.Packs.MCCHaloCE.Effects;
-using System;
 using CcLog = CrowdControl.Common.Log;
 
 namespace CrowdControl.Games.Packs.MCCHaloCE;
