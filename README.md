@@ -1,5 +1,11 @@
 ﻿# Halo Crowd Control Effect Pack
 
+## Pack metadata
+- **Game display name:** MCC Halo Combat Evolved
+- **Crowd Control game ID:** `MCCHaloCE`
+- **Connector type:** `PCConnector`
+
+
 This is an effect pack for doing Crowd Control on Halo CE on the Master Chief Collection. This is a version of the Cursed Halo crowd control pack with a few incentives removed and some modified to have no elements from Cursed Halo.
 
 ## Installation
