@@ -3,7 +3,7 @@
 This is an effect pack for doing Crowd Control on Halo CE on the Master Chief Collection. This is a version of the Cursed Halo crowd control pack with a few incentives removed and some modified to have no elements from Cursed Halo.
 
 ## Installation
-Requires: 
+Requires:
 - Master Chief Collection on Steam. If you have it elsewhere, like Game Pass, look into how to install Steam Worshop mods on that version and it should work as well.
 - And if trying to run it locally, the CrowdControl SDK. https://developer.crowdcontrol.live/sdk/
    - Copy the contents of this repository on \<folder of the CrowdControl SDK\>/PackProject/HaloCE
@@ -39,3 +39,8 @@ CrowdControl framework is provided by CrowdControl ( https://crowdcontrol.live/ 
 ## License
 
 [MIT](https://choosealicense.com/licenses/mit/)
+
+## Repository layout
+
+- `MCCHaloCE.cs` defines the pack.
+- `Effects/`, `Injections/`, `LifeCycle/`, and `Utilities/` contain its direct source.
